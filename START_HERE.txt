@@ -1,0 +1,15 @@
+WEATHER DISPLAY — FIRST HARDWARE-TEST RELEASE
+
+1. Extract the ZIP and open the weather-display folder in VS Code / PlatformIO.
+2. Start with README.md for build/upload and Wi-Fi setup.
+3. Build/upload the waveshare_7_8mb environment to the Waveshare display board.
+4. Follow docs/GOOGLE_CALENDAR_SETUP.md to authorize and deploy the calendar bridge.
+5. See docs/VALIDATION.md for the checks already run and the hardware checks to do.
+
+All settings are entered on the touchscreen. No configuration file is required.
+
+Weather is the startup screen.
+Swipe RIGHT -> Calendar. Swipe LEFT -> Settings. Swipe back to return.
+There are no page navigation buttons.
+
+Your existing weather station firmware does not need to be changed.
