@@ -63,6 +63,7 @@ static void updateScreenPower() {
   }
 }
 void setup() {
+  Serial.setRxBufferSize(1024);
   Serial.begin(115200);
   Serial.printf("Weather Display: flash=%u MB, PSRAM=%u MB\n",ESP.getFlashChipSize()/1048576,ESP.getPsramSize()/1048576);
   assert(ESP.getPsramSize()>=4*1024*1024);
@@ -84,5 +85,11 @@ void loop() {
   if (!backlightOff) uiTick();
   lv_timer_handler();
   updateScreenPower();
+  uiCalendarUsbExpire();
+  for (int remaining = 128; remaining > 0 && Serial.available(); --remaining) {
+    const auto result = uiCalendarUsbReceive(Serial.read());
+    if (result == CalendarUsbResult::Saved) Serial.println("CALENDAR SAVED");
+    if (result == CalendarUsbResult::Invalid) Serial.println("CALENDAR INVALID");
+  }
   delay(5);
 }

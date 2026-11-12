@@ -80,6 +80,38 @@ int main(int argc,char**argv){
  assert(findButton(lv_layer_top(),"Eastern (Toronto)"));
  lv_event_send(findButton(lv_layer_top(),"Eastern (Toronto)"),LV_EVENT_CLICKED,nullptr);frames();
  assert(settings.timezone=="EST5EDT,M3.2.0,M11.1.0");
+ auto sendCalendarLine = [](const std::string &line) {
+   for (char byte : line) assert(uiCalendarUsbReceive(byte) == CalendarUsbResult::Pending);
+   return uiCalendarUsbReceive('\n');
+ };
+ auto openCalendarUsb = [] {
+   auto *calendar = findLabel(lv_scr_act(), "Google Calendar");
+   assert(calendar);
+   lv_event_send(lv_obj_get_parent(calendar), LV_EVENT_CLICKED, nullptr);
+   auto *usb = findButton(lv_layer_top(), "Set up over USB");
+   assert(usb);
+   lv_event_send(usb, LV_EVENT_CLICKED, nullptr);
+ };
+ const std::string url = "https://script.google.com/macros/s/" + std::string(360, 'A') + "/exec";
+ const std::string token(128, 'a');
+ const std::string command = "CALENDAR " + url + " " + token;
+ assert(sendCalendarLine(command) == CalendarUsbResult::Pending);
+ openCalendarUsb();
+ assert(sendCalendarLine(command + "extra") == CalendarUsbResult::Invalid);
+ assert(settings.calendarUrl.isEmpty());
+ assert(sendCalendarLine(command) == CalendarUsbResult::Saved);
+ assert(settings.calendarUrl == url.c_str() && settings.calendarToken == token.c_str());
+ assert(calendarRefreshRequested.exchange(false));
+ frames();
+ openCalendarUsb();
+ testMillis += 120000;
+ uiCalendarUsbExpire();
+ assert(sendCalendarLine(command) == CalendarUsbResult::Pending);
+ lv_event_send(findButton(lv_layer_top(), "Close"), LV_EVENT_CLICKED, nullptr);
+ openCalendarUsb();
+ lv_event_send(findButton(lv_layer_top(), "Close"), LV_EVENT_CLICKED, nullptr);
+ assert(sendCalendarLine(command) == CalendarUsbResult::Pending);
+ std::cout<<"PASS: calendar USB setup accepts valid credentials only while enabled\n";
  // No three-page navigation buttons exist in the UI; screen title is a label only.
  std::cout<<"PASS: rendered weather, today, week, settings; swipe navigation, slider guard, scroll preservation, modal guard, time-zone selection, condition icon changes and stale fallback\n";
 }

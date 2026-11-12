@@ -16,6 +16,17 @@ static String lastCalendarError;
 static lv_obj_t *fields[3],*keyboard,*form,*contentScroller=nullptr;
 static bool renderedWeek=false;
 static Settings draft;
+static lv_obj_t *calendarUsbStatus = nullptr;
+static uint32_t calendarUsbStarted;
+static char calendarUsbLine[540];
+static size_t calendarUsbLength;
+static bool calendarUsbOverflow;
+
+static void clearCalendarUsbLine() {
+  for (volatile char &byte : calendarUsbLine) byte = 0;
+  calendarUsbLength = 0;
+  calendarUsbOverflow = false;
+}
 static const char*tzNames[]={"Manitoba (Winnipeg)","Eastern (Toronto)","Saskatchewan (no DST)","Mountain (Calgary)","Pacific (Vancouver)","Atlantic (Halifax)","Newfoundland (St. John's)","Yukon (no DST)","UTC"};
 static const char*tzCodes[]={core::winnipegTimeZone,"EST5EDT,M3.2.0,M11.1.0","CST6","MST7MDT,M3.2.0,M11.1.0","PST8PDT,M3.2.0,M11.1.0","AST4ADT,M3.2.0,M11.1.0","NST3:30NDT,M3.2.0,M11.1.0","MST7","UTC0"};
 static String timezoneName(){for(size_t i=0;i<9;++i)if(settings.timezone==tzCodes[i])return tzNames[i];return "Custom time zone";}
@@ -46,7 +57,7 @@ static String dateText(time_t t,const char*pattern){char b[80];tm d=*localtime(&
 static String temp(float n){return fmt(core::temp(n,settings.imperial))+ (settings.imperial?"°F":"°C");}
 static String speed(float n){return fmt(core::wind(n,settings.imperial),0)+(settings.imperial?" mph":" km/h");}
 static String rain(float n){return fmt(core::rain(n,settings.imperial),settings.imperial?2:1)+(settings.imperial?" in":" mm");}
-static void closeModal(){if(modal){lv_obj_del(modal);modal=nullptr;lv_obj_invalidate(lv_scr_act());}keyboard=nullptr;}
+static void closeModal(){if(calendarUsbStatus){calendarUsbStatus=nullptr;clearCalendarUsbLine();}if(modal){lv_obj_del(modal);modal=nullptr;lv_obj_invalidate(lv_scr_act());}keyboard=nullptr;}
 static void dismiss(lv_event_t*){closeModal();}
 static lv_obj_t* newModal(const String &title){
   closeModal();modal=box(lv_layer_top(),0,0,800,480,0x07131F,0);
@@ -185,6 +196,71 @@ static lv_obj_t *input(lv_obj_t*p,const char*name,const String&value,int y,bool 
   lv_textarea_set_one_line(t,true);lv_textarea_set_max_length(t,maxLen);lv_textarea_set_password_mode(t,secret);
   lv_textarea_set_text(t,value.c_str());lv_obj_add_event_cb(t,focusField,LV_EVENT_FOCUSED,nullptr);return t;
 }
+static void applyEditorSettings() {
+  xSemaphoreTake(stateMutex,portMAX_DELAY);settings=draft;
+  if(editKind==2 || editKind==3){shared.events.clear();shared.calendarLoaded=false;shared.calendarError="Loading calendar...";}
+  if(editKind==1){shared.weather=Weather();shared.weatherError="Connecting to station...";}
+  xSemaphoreGive(stateMutex);saveSettings();
+  if(editKind==2 || editKind==3) calendarRefreshRequested.store(true);
+  setenv("TZ",settings.timezone.c_str(),1);tzset();closeModal();redraw=true;calendarDirty=true;
+}
+
+static void startCalendarUsb(lv_event_t *) {
+  auto *screen = newModal("Google Calendar over USB");
+  label(screen, "Connect the display to your PC with its programming USB cable. "
+                "Close any serial monitor, then run the Windows helper from the setup guide.",
+        24, 86, 748);
+  calendarUsbStatus = label(screen, "Waiting for the URL and token (2 minutes).", 24, 170, 748);
+  calendarUsbStarted = millis();
+}
+
+void uiCalendarUsbExpire() {
+  if (!calendarUsbStatus || millis() - calendarUsbStarted < 120000) return;
+  lv_label_set_text(calendarUsbStatus, "USB setup expired. Close this screen and start again.");
+  calendarUsbStatus = nullptr;
+  clearCalendarUsbLine();
+}
+
+CalendarUsbResult uiCalendarUsbReceive(char byte) {
+  if (!calendarUsbStatus) return CalendarUsbResult::Pending;
+  if (byte != '\n') {
+    if (calendarUsbLength < sizeof(calendarUsbLine) - 1 && byte >= 32 && byte <= 126)
+      calendarUsbLine[calendarUsbLength++] = byte;
+    else
+      calendarUsbOverflow = true;
+    return CalendarUsbResult::Pending;
+  }
+
+  constexpr char prefix[] = "CALENDAR ";
+  calendarUsbLine[calendarUsbLength] = 0;
+  const char *url = calendarUsbLine + sizeof(prefix) - 1;
+  const char *separator = strchr(url, ' ');
+  if (!calendarUsbOverflow && strncmp(calendarUsbLine, prefix, sizeof(prefix) - 1) == 0 && separator) {
+    constexpr char googlePrefix[] = "https://script.google.com/macros/s/";
+    const size_t urlLength = separator - url;
+    const char *token = separator + 1;
+    const size_t tokenLength = strlen(token);
+    if (urlLength > sizeof(googlePrefix) - 1 + 5 && urlLength <= 400 &&
+        strncmp(url, googlePrefix, sizeof(googlePrefix) - 1) == 0 &&
+        strncmp(separator - 5, "/exec", 5) == 0 &&
+        tokenLength >= 32 && tokenLength <= 128 &&
+        strspn(token, "0123456789abcdefABCDEF") == tokenLength &&
+        strspn(url + sizeof(googlePrefix) - 1,
+               "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-") ==
+            urlLength - (sizeof(googlePrefix) - 1) - 5) {
+      calendarUsbLine[urlLength + sizeof(prefix) - 1] = 0;
+      draft = settings;
+      draft.calendarUrl = url;
+      draft.calendarToken = token;
+      applyEditorSettings();
+      return CalendarUsbResult::Saved;
+    }
+  }
+  clearCalendarUsbLine();
+  lv_label_set_text(calendarUsbStatus, "Check the /exec URL and hexadecimal token, then try again.");
+  return CalendarUsbResult::Invalid;
+}
+
 static void editorSave(lv_event_t*){
   auto value=[](int i){String s=lv_textarea_get_text(fields[i]);return s;};
   if(editKind==0){draft.ssid=value(0);draft.password=value(1);}
@@ -197,11 +273,7 @@ static void editorSave(lv_event_t*){
      (editKind==3 && draft.timezone.isEmpty())){
     lv_obj_t *msg=lv_msgbox_create(modal,"Check settings","Check the address, token, Wi-Fi length, or time zone format.",nullptr,true);lv_obj_center(msg);return;
   }
-  xSemaphoreTake(stateMutex,portMAX_DELAY);settings=draft;
-  if(editKind==2 || editKind==3){shared.events.clear();shared.calendarLoaded=false;shared.calendarError="Loading calendar...";}
-  if(editKind==1){shared.weather=Weather();shared.weatherError="Connecting to station...";}
-  xSemaphoreGive(stateMutex);saveSettings();
-  setenv("TZ",settings.timezone.c_str(),1);tzset();closeModal();redraw=true;calendarDirty=true;
+  applyEditorSettings();
 }
 static void timezoneSelect(lv_event_t*e){
   int i=(intptr_t)lv_event_get_user_data(e);if(i<0 || i>=9)return;
@@ -219,6 +291,7 @@ static void edit(lv_event_t *e){
   }
   const char*titles[]={"Wi-Fi setup","Weather station address","Google Calendar setup","Time zone (POSIX)"};
   auto*m=newModal(titles[editKind]);button(m,"Save",570,10,96,44,editorSave);
+  if(editKind==2)button(m,"Set up over USB",396,10,158,44,startCalendarUsb,nullptr,CARD);
   form=box(m,24,72,752,164,CARD);lv_obj_add_flag(form,LV_OBJ_FLAG_SCROLLABLE);lv_obj_set_scroll_dir(form,LV_DIR_VER);
   keyboard=lv_keyboard_create(m);lv_obj_set_align(keyboard,LV_ALIGN_TOP_LEFT);lv_obj_set_pos(keyboard,0,252);lv_obj_set_size(keyboard,800,228);
   if(editKind==0){fields[0]=input(form,"Network name (2.4 GHz)",draft.ssid,8,false,32);fields[1]=input(form,"Wi-Fi password",draft.password,96,true,63);}

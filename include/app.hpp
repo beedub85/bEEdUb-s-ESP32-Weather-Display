@@ -45,3 +45,7 @@ void uiBegin();
 void uiTick();
 void uiTouch(bool pressed,int x,int y);
 void uiSetDimming(int percent);
+
+enum class CalendarUsbResult { Pending, Saved, Invalid };
+CalendarUsbResult uiCalendarUsbReceive(char byte);
+void uiCalendarUsbExpire();

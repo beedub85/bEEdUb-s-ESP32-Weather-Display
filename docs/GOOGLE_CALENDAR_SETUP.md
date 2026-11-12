@@ -23,15 +23,34 @@ primary,your-shared-calendar-id@group.calendar.google.com
 
 Find an ID in Google Calendar → Settings → the calendar → Integrate calendar → Calendar ID. Your Google account must have read access to each chosen calendar. Up to eight are used. The bridge preserves Google's event colors, falling back to the calendar color. Shared calendars remain private in Google Calendar; do not make them publicly visible.
 
-## Deploy and enter device settings
+## Deploy the bridge
 
 1. Click **Deploy → New deployment**.
 2. Choose **Web app**.
 3. Set **Execute as: Me**.
 4. Set **Who has access: Anyone**, so the ESP32 can call it without an interactive Google sign-in. This is the anonymous web-app endpoint, protected separately by your generated token. 
 5. Click Deploy and copy the **Web app URL** ending in `/exec`. Use this URL, not the test `/dev` URL.
-6. On the display, swipe left from Weather → Google Calendar. Enter the URL and token into their separate fields and Save. Use the touchscreen keyboard for both fields. Scroll the form to reach the token field.
-7. Swipe back to Weather, then right to Calendar. Once Wi-Fi and internet time sync finish, your events should load. Use the refresh icon to retry manually.
+## Enter the URL and token over USB on Windows
+
+Flash the updated firmware with **Set up over USB** in the Google Calendar settings first. If that button is missing, update the firmware or use the touchscreen method below.
+
+1. Connect the display to your Windows PC with the same USB data cable and programming port you use for PlatformIO uploads. Close the PlatformIO Serial Monitor so the helper can open the port.
+2. In PowerShell, open the `weather-display` project folder and run the helper. Replace `COM4` if your upload uses a different port.
+
+   ```powershell
+   powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\set-calendar-usb.ps1 -Port COM4
+   ```
+
+3. Paste the deployed **Web app URL** at the first prompt and press Enter. Paste only the **Display token** at the second prompt and press Enter. PowerShell masks the token.
+4. When the helper prompts you, swipe left from Weather on the display and tap **Google Calendar → Set up over USB**. Press Enter on the PC within two minutes. Use **Close** on the display to cancel.
+5. Wait for **Calendar settings saved on the display**. The helper transfers the URL and token over the cable and the display saves them for future boots. Swipe right from Weather to see Calendar after Wi-Fi and internet time sync. Use the refresh icon to retry manually.
+
+The USB helper configures the display only. Set `CALENDAR_IDS` under **Project Settings → Script Properties** in Apps Script as described above.
+
+## Enter the URL and token on the touchscreen
+
+Swipe left from Weather and tap **Google Calendar**. Enter the URL and token in their separate fields, then tap **Save**. Scroll the form to reach the token field. Swipe back to Weather, then right to Calendar.
+
 
 The token is a bearer secret: anyone who obtains both it and the endpoint can read the selected event fields. Keep it private, do not post a token-bearing URL, and do not paste it into this conversation. It is sent in an HTTPS query because Apps Script's standard `doGet` interface provides query parameters rather than arbitrary request headers. The bridge checks the token before making any Calendar API calls and never logs request URLs or event data. The script does not grant unauthenticated callers your Google OAuth token.
 
