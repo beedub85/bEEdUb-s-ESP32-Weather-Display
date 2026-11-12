@@ -1,6 +1,8 @@
 #pragma once
 #define LV_CONF_H
 #include <stdint.h>
+#define LV_DISP_DEF_REFR_PERIOD 20
+#define LV_INDEV_DEF_READ_PERIOD 15
 #define LV_COLOR_DEPTH 16
 #define LV_COLOR_16_SWAP 0
 #define LV_MEM_CUSTOM 1

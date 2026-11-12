@@ -9,7 +9,7 @@ Settings settings;
 State shared;
 SemaphoreHandle_t stateMutex;
 volatile int requestedWeek=0;
-volatile uint32_t requestVersion=1;
+std::atomic<bool> calendarRefreshRequested{false};
 static void lock(){xSemaphoreTake(stateMutex,portMAX_DELAY);}
 static void unlock(){xSemaphoreGive(stateMutex);}
 void loadSettings(){
@@ -26,7 +26,7 @@ void saveSettings(){
   Preferences p;p.begin("wx-display",false);
   p.putString("ssid",c.ssid);p.putString("password",c.password);p.putString("station",c.station);
   p.putString("calurl",c.calendarUrl);p.putString("caltoken",c.calendarToken);p.putString("tz",c.timezone);
-  p.putBool("imperial",c.imperial);p.putInt("dim",c.brightness);p.end();++requestVersion;
+  p.putBool("imperial",c.imperial);p.putInt("dim",c.brightness);p.end();
 }
 class ExternalJsonAllocator:public ArduinoJson::Allocator {
 public:
@@ -121,11 +121,13 @@ static bool fetchCalendar(const Settings &c,time_t week,core::Events &events,boo
 }
 static void networkTask(void*){
   WiFi.mode(WIFI_STA);WiFi.setSleep(false);WiFi.setAutoReconnect(true);
-  String lastSSID,lastPassword,lastTZ;
-  uint32_t weatherAt=0,calendarAt=0,lastReconnect=0,seenVersion=0;
-  time_t seenWeek=0;bool first=true,wasConnected=false;
+  String lastSSID,lastPassword,lastTZ,lastStation;
+  constexpr uint32_t calendarPollIntervalMs = 5 * 60 * 1000;
+  uint32_t weatherAt = 0, calendarAt = 0, lastReconnect = 0;
+  bool calendarAttempted = false;
+  bool first = true, wasConnected = false;
   for(;;){
-    lock();Settings c=settings;unlock();uint32_t revision=requestVersion;int offset=requestedWeek;
+    lock();Settings c=settings;unlock();
     if(c.timezone!=lastTZ){configTzTime(c.timezone.c_str(),"time.google.com","pool.ntp.org");lastTZ=c.timezone;}
     if(c.ssid!=lastSSID || c.password!=lastPassword || first){
       WiFi.disconnect();if(c.ssid.length())WiFi.begin(c.ssid.c_str(),c.password.c_str());
@@ -137,22 +139,51 @@ static void networkTask(void*){
       if(c.ssid.length() && millis()-lastReconnect>20000){WiFi.reconnect();lastReconnect=millis();}
       vTaskDelay(pdMS_TO_TICKS(300));continue;
     }
-    bool force=revision!=seenVersion || !wasConnected;wasConnected=true;uint32_t now=millis();
-    if(force || !weatherAt || now-weatherAt>=5000){
+    bool justConnected = !wasConnected;
+    wasConnected = true;
+    uint32_t now = millis();
+    if (justConnected || c.station != lastStation || now - weatherAt >= weatherPollIntervalMs) {
+      lastStation = c.station;
       Weather w;String error;bool ok=fetchWeather(c,w,error);
-      lock();if(revision==requestVersion){if(ok){shared.weather=std::move(w);shared.weatherError="";}else shared.weatherError=error;}unlock();weatherAt=millis();
+      lock();if(c.station==settings.station){if(ok){shared.weather=std::move(w);shared.weatherError="";}else shared.weatherError=error;}unlock();weatherAt=millis();
     }
-    time_t clock=time(nullptr);
-    if(clock>1700000000){
-      time_t week=core::monday(clock,offset);
-      if(force || week!=seenWeek || !calendarAt || millis()-calendarAt>=300000){
-        core::Events events;String error;bool truncated=false;
-        bool ok=fetchCalendar(c,week,events,truncated,error);
-        lock();if(revision==requestVersion){if(ok){shared.events=std::move(events);shared.calendarWeek=week;shared.calendarLoaded=true;shared.truncated=truncated;shared.calendarReceived=millis();shared.calendarError="";}
-        else shared.calendarError=error;}unlock();calendarAt=millis();seenWeek=week;
+    const time_t clock = time(nullptr);
+    if (clock > 1700000000) {
+      const bool manualRefresh = calendarRefreshRequested.exchange(false);
+      if (manualRefresh || !calendarAttempted || millis() - calendarAt >= calendarPollIntervalMs) {
+        lock();
+        c = settings;
+        unlock();
+        const time_t week = core::sunday(clock, requestedWeek);
+        core::Events events;
+        String error;
+        bool truncated = false;
+        const bool ok = fetchCalendar(c, week, events, truncated, error);
+        calendarAt = millis();
+        calendarAttempted = true;
+
+        lock();
+        if (c.calendarUrl == settings.calendarUrl && c.calendarToken == settings.calendarToken &&
+            c.timezone == settings.timezone) {
+          if (ok) {
+            shared.events = std::move(events);
+            shared.calendarWeek = week;
+            shared.calendarLoaded = true;
+            shared.truncated = truncated;
+            shared.calendarReceived = millis();
+            shared.calendarError = "";
+          } else {
+            shared.calendarError = error;
+          }
+        }
+        unlock();
       }
-    }else{lock();shared.calendarError="Waiting for internet time sync";unlock();}
-    seenVersion=revision;vTaskDelay(pdMS_TO_TICKS(150));
+    } else {
+      lock();
+      shared.calendarError = "Waiting for internet time sync";
+      unlock();
+    }
+    vTaskDelay(pdMS_TO_TICKS(150));
   }
 }
 void startNetwork(){assert(xTaskCreatePinnedToCore(networkTask,"network",16384,nullptr,1,nullptr,0)==pdPASS);}

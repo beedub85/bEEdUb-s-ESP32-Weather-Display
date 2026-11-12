@@ -5,7 +5,7 @@
 #include <iostream>
 uint32_t testMillis=10000;
 Settings settings;State shared;SemaphoreHandle_t stateMutex=nullptr;
-volatile int requestedWeek=0;volatile uint32_t requestVersion=1;FakeWiFi WiFi;
+volatile int requestedWeek=0;std::atomic<bool> calendarRefreshRequested{false};FakeWiFi WiFi;
 void saveSettings(){}void loadSettings(){}void startNetwork(){}
 static lv_color_t fb[800*480],buf[800*32];
 static void flush(lv_disp_drv_t*d,const lv_area_t*a,lv_color_t*p){for(int y=a->y1;y<=a->y2;++y)for(int x=a->x1;x<=a->x2;++x)fb[y*800+x]=*p++;lv_disp_flush_ready(d);}
@@ -21,20 +21,48 @@ int main(int argc,char**argv){
  static lv_disp_draw_buf_t b;lv_disp_draw_buf_init(&b,buf,nullptr,800*32);
  static lv_disp_drv_t d;lv_disp_drv_init(&d);d.hor_res=800;d.ver_res=480;d.draw_buf=&b;d.flush_cb=flush;lv_disp_drv_register(&d);
  auto&w=shared.weather;w.loaded=true;w.received=10000;w.temp=18.6;w.hum=62;w.dew=11.2;w.min=12.4;w.max=20.1;w.wind=12;w.gust=19;w.dir=45;w.press=1013;w.raining=true;w.rain=2.4;w.hour=0.8;w.lux=8420;w.solar=75;w.aqi=2;w.eco2=620;w.tvoc=84;shared.weatherError="";
- time_t now=time(nullptr);time_t week=core::monday(now);shared.calendarLoaded=true;shared.calendarWeek=week;shared.calendarReceived=10000;shared.calendarError="";
+ time_t now=time(nullptr);time_t week=core::sunday(now);shared.calendarLoaded=true;shared.calendarWeek=week;shared.calendarReceived=10000;shared.calendarError="";
  time_t day=core::midnight(now);
  for(int i=0;i<5;++i){core::Event e;e.title=i%2?"Project planning":"Team meeting";e.location="Office";e.calendar="Personal";e.start=day+9*3600+i*90*60;e.end=e.start+3600;e.color=i%2?0x34A853:0x4285F4;shared.events.push_back(e);}
  core::Event all;all.title="All-day reminder";all.allDay=true;char dates[16];tm t=*localtime(&day);strftime(dates,16,"%Y-%m-%d",&t);all.startDate=dates;day=core::addDays(day,1);t=*localtime(&day);strftime(dates,16,"%Y-%m-%d",&t);all.endDate=dates;shared.events.push_back(all);
  uiBegin();frames();capture("weather.ppm");
+ // Tap each card through its LVGL event and verify that its details are scoped.
+ struct CardCase { const char *title; const char *reading; };
+ const CardCase cards[] = {
+   {"TEMPERATURE", "Temperature"}, {"HUMIDITY", "Relative humidity"},
+   {"WIND", "Wind speed"}, {"PRESSURE", "Atmospheric pressure"},
+   {"RAINFALL", "Rain (rolling 24 hours)"}, {"LIGHT", "Light"},
+   {"AIR QUALITY", "ENS160 AQI"}
+ };
+ for (const auto &card : cards) {
+   auto *title = findLabel(lv_scr_act(), card.title);
+   assert(title);
+   lv_event_send(lv_obj_get_parent(title), LV_EVENT_CLICKED, nullptr);
+   auto *heading = findLabel(lv_layer_top(), card.title);
+   assert(heading);
+   auto *body = lv_obj_get_child(lv_obj_get_parent(heading), 2);
+   const std::string readings = lv_label_get_text(lv_obj_get_child(body, 0));
+   for (const auto &other : cards) {
+     const bool containsReading = readings.find(other.reading) != std::string::npos;
+     assert(containsReading == (&card == &other));
+   }
+   lv_event_send(findButton(lv_layer_top(), "Close"), LV_EVENT_CLICKED, nullptr);
+ }
+
  // Render real condition changes through the same published weather snapshot.
  struct ConditionCase{const char*file;float lux;bool raining;const char*caption;};
  for(const auto&c:std::vector<ConditionCase>{{"weather-sunny.ppm",35000,false,"Sunny (est.)"},{"weather-partly-cloudy.ppm",8000,false,"Partly cloudy (est.)"},{"weather-cloudy.ppm",2000,false,"Cloudy (est.)"},{"weather-low-light.ppm",5,false,"Low light"},{"weather-raining.ppm",35000,true,"Rain detected"},{"weather-unavailable.ppm",NAN,false,"Sky unavailable"}}){
    w.lux=c.lux;w.raining=c.raining;w.received=testMillis;testMillis+=1100;lv_tick_inc(1100);frames();
    assert(findLabel(lv_scr_act(),c.caption));capture(c.file);
  }
- w.lux=8420;w.raining=true;w.received=testMillis;testMillis+=31001;lv_tick_inc(31001);frames();assert(findLabel(lv_scr_act(),"Sky unavailable"));
+ w.lux=8420;w.raining=true;w.received=testMillis;testMillis+=weatherStaleAfterMs+1;lv_tick_inc(weatherStaleAfterMs+1);frames();assert(findLabel(lv_scr_act(),"Sky unavailable"));
  w.received=testMillis;testMillis+=1100;lv_tick_inc(1100);frames();swipe(true);capture("calendar-today.ppm");
  auto*weekButton=findButton(lv_scr_act(),"Week");assert(weekButton);lv_event_send(weekButton,LV_EVENT_CLICKED,nullptr);frames();capture("calendar-week.ppm");
+ assert(!calendarRefreshRequested.load());
+ auto *refreshButton = findButton(lv_scr_act(), LV_SYMBOL_REFRESH);
+ assert(refreshButton);
+ lv_event_send(refreshButton, LV_EVENT_CLICKED, nullptr);
+ assert(calendarRefreshRequested.exchange(false));
  auto*hour=findLabel(lv_scr_act(),"09:00");assert(hour);
  auto*scroller=lv_obj_get_parent(lv_obj_get_parent(hour));lv_obj_scroll_to_y(scroller,14*54,LV_ANIM_OFF);
  testMillis+=61000;lv_tick_inc(61000);frames();

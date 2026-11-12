@@ -43,8 +43,9 @@ inline time_t midnight(time_t t) {
 inline time_t addDays(time_t t, int days) {
   tm d = *localtime(&t); d.tm_mday += days; d.tm_isdst = -1; return mktime(&d);
 }
-inline time_t monday(time_t now, int offset = 0) {
-  tm d = *localtime(&now); return addDays(midnight(now), -((d.tm_wday + 6) % 7) + offset * 7);
+inline time_t sunday(time_t now, int offset = 0) {
+  const tm local = *localtime(&now);
+  return addDays(midnight(now), -local.tm_wday + offset * 7);
 }
 inline time_t dateEpoch(const EventText &s) {
   int y=0,m=0,d=0;

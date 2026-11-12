@@ -8,6 +8,7 @@ static icons::State iconStates[7];
 static State snapshot;
 static int page=1; // Calendar=0, Weather=1, Settings=2.
 static bool weekView=false,redraw=false,calendarDirty=true;
+static bool touchDown = false;
 static int navigation=0,editKind=0;
 static uint32_t lastTick=0,lastCalendar=0;
 static time_t lastMinute=0,shownWeek=0;
@@ -18,6 +19,10 @@ static Settings draft;
 static const char*tzNames[]={"Central (Winnipeg)","Eastern (Toronto)","Saskatchewan (no DST)","Mountain (Calgary)","Pacific (Vancouver)","Atlantic (Halifax)","Newfoundland (St. John's)","Yukon (no DST)","UTC"};
 static const char*tzCodes[]={"CST6CDT,M3.2.0,M11.1.0","EST5EDT,M3.2.0,M11.1.0","CST6","MST7MDT,M3.2.0,M11.1.0","PST8PDT,M3.2.0,M11.1.0","AST4ADT,M3.2.0,M11.1.0","NST3:30NDT,M3.2.0,M11.1.0","MST7","UTC0"};
 static String timezoneName(){for(size_t i=0;i<9;++i)if(settings.timezone==tzCodes[i])return tzNames[i];return "Custom time zone";}
+
+static void updateLabel(lv_obj_t *label, const char *text) {
+  if (strcmp(lv_label_get_text(label), text) != 0) lv_label_set_text(label, text);
+}
 
 static lv_color_t color(uint32_t c){return lv_color_hex(c);}
 static lv_obj_t* box(lv_obj_t*p,int x,int y,int w,int h,uint32_t bg,int radius=14){
@@ -58,61 +63,109 @@ static void eventDetails(lv_event_t *ev){
   label(body,when,20,98,700,&lv_font_montserrat_18,TEAL);
   label(body,String("Calendar: ")+e.calendar.c_str()+"\n\nLocation: "+e.location.c_str()+"\n\n"+e.description.c_str(),20,160,700);
 }
-static void weatherDetails(lv_event_t*){
-  if(navigation)return;const auto&w=snapshot.weather;
-  auto*m=newModal("All station readings");auto*b=box(m,20,72,760,390,CARD);
-  lv_obj_add_flag(b,LV_OBJ_FLAG_SCROLLABLE);lv_obj_set_scroll_dir(b,LV_DIR_VER);
-  String s="Temperature   "+temp(w.temp)+"\nHumidity   "+fmt(w.hum)+" %\nDew point   "+temp(w.dew)+
-    "\nToday's low / high   "+temp(w.min)+" / "+temp(w.max)+"\nPressure   "+fmt(core::pressure(w.press,settings.imperial),settings.imperial?2:1)+(settings.imperial?" inHg":" hPa")+
-    "\nWind speed   "+speed(w.wind)+"\nPeak gust today   "+speed(w.gust)+"\nPeak gust (10 minutes)   "+speed(w.gust10)+
-    "\nWind direction   "+fmt(w.dir,0)+"° "+core::compass(w.dir)+"\nRain (rolling 24 hours)   "+rain(w.rain)+
-    "\nRain (rolling hour)   "+rain(w.hour)+"\nRain (since reset)   "+rain(w.total)+"\nBucket tips   "+String(w.tips)+"\nRain in last 5 minutes   "+(w.raining?"Yes":"No")+
-    "\nLight   "+fmt(w.lux,0)+" lx\nEstimated solar radiation   "+fmt(w.solar,0)+" W/m2\nENS160 AQI   "+fmt(w.aqi,0)+" / 5"+
-    "\neCO2   "+fmt(w.eco2,0)+" ppm (estimated, not measured CO2)\nTVOC   "+fmt(w.tvoc,0)+" ppb\nSupply voltage   "+fmt(w.vcc,2)+
-    " V\n\nFirmware   "+w.firmware+"\nStation uptime   "+w.uptime+"\nStation IP   "+w.ip+"\nStation Wi-Fi   "+w.ssid+" ("+w.rssi+")\nStation time   "+w.stationTime;
-  label(b,s,20,16,715,&lv_font_montserrat_18);label(b,"",0,1110,1);
+static const char *weatherCardTitles[] = {
+  "TEMPERATURE", "HUMIDITY", "WIND", "PRESSURE", "RAINFALL", "LIGHT", "AIR QUALITY"
+};
+
+static void weatherDetails(lv_event_t *event) {
+  if (navigation) return;
+  const auto card = reinterpret_cast<uintptr_t>(lv_event_get_user_data(event));
+  const auto &weather = snapshot.weather;
+  String readings;
+
+  switch (card) {
+    case 0:
+      readings = "Temperature   " + temp(weather.temp) +
+        "\nToday's low / high   " + temp(weather.min) + " / " + temp(weather.max) +
+        "\nDew point   " + temp(weather.dew);
+      break;
+    case 1:
+      readings = "Relative humidity   " + fmt(weather.hum) + " %";
+      break;
+    case 2:
+      readings = "Wind speed   " + speed(weather.wind) +
+        "\nPeak gust today   " + speed(weather.gust) +
+        "\nPeak gust (10 minutes)   " + speed(weather.gust10) +
+        "\nWind direction   " + fmt(weather.dir, 0) + "° " + core::compass(weather.dir);
+      break;
+    case 3:
+      readings = "Atmospheric pressure   " +
+        fmt(core::pressure(weather.press, settings.imperial), settings.imperial ? 2 : 1) +
+        (settings.imperial ? " inHg" : " hPa");
+      break;
+    case 4: {
+      const bool fresh = weather.loaded && millis() - weather.received <= weatherStaleAfterMs &&
+        snapshot.weatherError.isEmpty();
+      readings = "Rain (rolling 24 hours)   " + rain(weather.rain) +
+        "\nRain (rolling hour)   " + rain(weather.hour) +
+        "\nRain (since reset)   " + rain(weather.total) +
+        "\nBucket tips   " + (weather.loaded ? String(weather.tips) : String("--")) +
+        "\nRain in last 5 minutes   " + (fresh ? (weather.raining ? "Yes" : "No") : "--");
+      break;
+    }
+    case 5:
+      readings = "Light   " + fmt(weather.lux, 0) + " lx" +
+        "\nEstimated solar radiation   " + fmt(weather.solar, 0) + " W/m2";
+      break;
+    case 6:
+      readings = "ENS160 AQI   " + fmt(weather.aqi, 0) + " / 5" +
+        "\neCO2 estimate   " + fmt(weather.eco2, 0) + " ppm" +
+        "\nTVOC   " + fmt(weather.tvoc, 0) + " ppb";
+      break;
+    default:
+      return;
+  }
+
+  auto *details = newModal(weatherCardTitles[card]);
+  auto *body = box(details, 20, 72, 760, 390, CARD);
+  label(body, readings, 20, 16, 715, &lv_font_montserrat_18);
 }
 static void weatherUpdate(){
   const Weather&w=snapshot.weather;
-  bool fresh=w.loaded && millis()-w.received<=30000 && snapshot.weatherError.isEmpty();
+  bool fresh=w.loaded && millis()-w.received<=weatherStaleAfterMs && snapshot.weatherError.isEmpty();
   icons::Kind sky=icons::condition(fresh,w.raining,w.lux);
-  iconStates[0].kind=sky;
-  iconStates[1]={std::isfinite(w.hum)?icons::Kind::Humidity:icons::Kind::Unknown,w.hum>70?0x55BCFF:w.hum<30?0xFFC85A:TEAL};
-  iconStates[2]={std::isfinite(w.wind)?icons::Kind::Wind:icons::Kind::Unknown,TEAL};
-  iconStates[3]={std::isfinite(w.press)?icons::Kind::Gauge:icons::Kind::Unknown,TEAL};
-  iconStates[4]={fresh?(w.raining?icons::Kind::Rain:icons::Kind::DryRain):icons::Kind::Unknown,0x55BCFF};
-  iconStates[5]={std::isfinite(w.lux)?icons::Kind::Light:icons::Kind::Unknown,0xFFC85A};
-  iconStates[6]={std::isfinite(w.aqi)?icons::Kind::Air:icons::Kind::Unknown,w.aqi>=4?0xFFB56B:TEAL};
-  for(auto*image:weatherImages)lv_obj_invalidate(image);
-  lv_label_set_text(conditionLabel,icons::caption(sky));
-  lv_label_set_text(weatherValues[0],temp(w.temp).c_str());
-  lv_label_set_text(weatherValues[1],(fmt(w.hum,0)+"%").c_str());
-  lv_label_set_text(weatherValues[2],speed(w.wind).c_str());
-  lv_label_set_text(weatherValues[3],(fmt(core::pressure(w.press,settings.imperial),settings.imperial?2:0)+(settings.imperial?" inHg":" hPa")).c_str());
-  lv_label_set_text(weatherValues[4],rain(w.rain).c_str());
-  lv_label_set_text(weatherValues[5],(fmt(w.lux,0)+" lx").c_str());
-  lv_label_set_text(weatherValues[6],(String("AQI ")+fmt(w.aqi,0)+" / 5").c_str());
-  lv_label_set_text(weatherSub[0],(String("Dew point ")+temp(w.dew)+"\nLow "+temp(w.min)+"  High "+temp(w.max)).c_str());
-  lv_label_set_text(weatherSub[1],"Relative humidity");
-  lv_label_set_text(weatherSub[2],(String(core::compass(w.dir))+"  "+fmt(w.dir,0)+"°\nGust "+speed(w.gust)).c_str());
-  lv_label_set_text(weatherSub[3],"Atmospheric pressure");
-  lv_label_set_text(weatherSub[4],(String("Rolling 24h\nLast hour ")+rain(w.hour)+"\n"+(fresh?(w.raining?"Rain detected":"No recent rain"):"Status unavailable")).c_str());
-  lv_label_set_text(weatherSub[5],(String("Solar est. ")+fmt(w.solar,0)+" W/m2").c_str());
-  lv_label_set_text(weatherSub[6],(String("eCO2 ")+fmt(w.eco2,0)+" ppm\nTVOC "+fmt(w.tvoc,0)+" ppb").c_str());
+  icons::State nextIcons[7];
+  nextIcons[0].kind=sky;
+  nextIcons[1]={std::isfinite(w.hum)?icons::Kind::Humidity:icons::Kind::Unknown,w.hum>70?0x55BCFF:w.hum<30?0xFFC85A:TEAL};
+  nextIcons[2]={std::isfinite(w.wind)?icons::Kind::Wind:icons::Kind::Unknown,TEAL};
+  nextIcons[3]={std::isfinite(w.press)?icons::Kind::Gauge:icons::Kind::Unknown,TEAL};
+  nextIcons[4]={fresh?(w.raining?icons::Kind::Rain:icons::Kind::DryRain):icons::Kind::Unknown,0x55BCFF};
+  nextIcons[5]={std::isfinite(w.lux)?icons::Kind::Light:icons::Kind::Unknown,0xFFC85A};
+  nextIcons[6]={std::isfinite(w.aqi)?icons::Kind::Air:icons::Kind::Unknown,w.aqi>=4?0xFFB56B:TEAL};
+  for (size_t i = 0; i < 7; ++i) {
+    if (iconStates[i].kind != nextIcons[i].kind || iconStates[i].accent != nextIcons[i].accent) {
+      iconStates[i] = nextIcons[i];
+      lv_obj_invalidate(weatherImages[i]);
+    }
+  }
+  updateLabel(conditionLabel,icons::caption(sky));
+  updateLabel(weatherValues[0],temp(w.temp).c_str());
+  updateLabel(weatherValues[1],(fmt(w.hum,0)+"%").c_str());
+  updateLabel(weatherValues[2],speed(w.wind).c_str());
+  updateLabel(weatherValues[3],(fmt(core::pressure(w.press,settings.imperial),settings.imperial?2:0)+(settings.imperial?" inHg":" hPa")).c_str());
+  updateLabel(weatherValues[4],rain(w.rain).c_str());
+  updateLabel(weatherValues[5],(fmt(w.lux,0)+" lx").c_str());
+  updateLabel(weatherValues[6],(String("AQI ")+fmt(w.aqi,0)+" / 5").c_str());
+  updateLabel(weatherSub[0],(String("Dew point ")+temp(w.dew)+"\nLow "+temp(w.min)+"  High "+temp(w.max)).c_str());
+  updateLabel(weatherSub[1],"Relative humidity");
+  updateLabel(weatherSub[2],(String(core::compass(w.dir))+"  "+fmt(w.dir,0)+"°\nGust "+speed(w.gust)).c_str());
+  updateLabel(weatherSub[3],"Atmospheric pressure");
+  updateLabel(weatherSub[4],(String("Rolling 24h\nLast hour ")+rain(w.hour)+"\n"+(fresh?(w.raining?"Rain detected":"No recent rain"):"Status unavailable")).c_str());
+  updateLabel(weatherSub[5],(String("Solar est. ")+fmt(w.solar,0)+" W/m2").c_str());
+  updateLabel(weatherSub[6],(String("eCO2 ")+fmt(w.eco2,0)+" ppm\nTVOC "+fmt(w.tvoc,0)+" ppb").c_str());
   String status;
   if(!snapshot.weatherError.isEmpty())status=snapshot.weatherError;
-  else if(w.loaded)status="Updated "+String((millis()-w.received)/1000)+" sec ago • Tap a card for all readings";
+  else if(w.loaded)status="Updated "+String((millis()-w.received)/1000)+" sec ago • Tap a card for details";
   else status="Waiting for weather readings";
-  if(w.loaded && millis()-w.received>30000)status="STALE DATA • "+status;
-  lv_label_set_text(statusLabel,status.c_str());
+  if(w.loaded && millis()-w.received>weatherStaleAfterMs)status="STALE DATA • "+status;
+  updateLabel(statusLabel,status.c_str());
 }
 static void weatherScreen(){
-  const char*titles[]={"TEMPERATURE","HUMIDITY","WIND","PRESSURE","RAINFALL","LIGHT","AIR QUALITY"};
   const int xs[]={16,360,568,16,212,408,604},ys[]={76,76,76,254,254,254,254},ws[]={328,192,216,180,180,180,180};
   for(int i=0;i<7;++i){
     auto*b=box(root,xs[i],ys[i],ws[i],i<3?162:152,CARD);
-    lv_obj_add_flag(b,LV_OBJ_FLAG_CLICKABLE);lv_obj_add_event_cb(b,weatherDetails,LV_EVENT_CLICKED,nullptr);
-    label(b,titles[i],16,14,i==0?150:ws[i]-66,&lv_font_montserrat_14,MUTED);
+    lv_obj_add_flag(b,LV_OBJ_FLAG_CLICKABLE);lv_obj_add_event_cb(b,weatherDetails,LV_EVENT_CLICKED,reinterpret_cast<void*>(static_cast<uintptr_t>(i)));
+    label(b,weatherCardTitles[i],16,14,i==0?150:ws[i]-66,&lv_font_montserrat_14,MUTED);
     weatherImages[i]=icons::create(b,i==0?16:ws[i]-50,i==0?42:8,i==0?64:38,&iconStates[i]);
     if(i==0)conditionLabel=label(b,"",160,16,156,&lv_font_montserrat_12,TEAL);
     weatherValues[i]=label(b,"--",i==0?96:16,i==0?46:55,i==0?216:ws[i]-24,i==0?&lv_font_montserrat_48:i==1?&lv_font_montserrat_32:i==2?&lv_font_montserrat_28:&lv_font_montserrat_24);
@@ -202,9 +255,11 @@ static void viewChange(lv_event_t *e){
   if(action==2){requestedWeek=0;weekView=true;}
   if(action==3){requestedWeek=std::max(-12,(int)requestedWeek-1);weekView=true;}
   if(action==4){requestedWeek=std::min(12,(int)requestedWeek+1);weekView=true;}
-  ++requestVersion;redraw=true;calendarDirty=true;
+  redraw=true;calendarDirty=true;
 }
-static void refreshCalendar(lv_event_t*){++requestVersion;calendarDirty=true;}
+static void refreshCalendar(lv_event_t*) {
+  calendarRefreshRequested.store(true);
+}
 static void calendarScreen(){
   button(root,"Today",20,70,86,42,viewChange,(void*)0,weekView?0x64748B:BLUE);
   button(root,"Week",114,70,86,42,viewChange,(void*)1,weekView?BLUE:0x64748B);
@@ -234,7 +289,7 @@ static void agenda(){
   if(!y)label(b,"No events today",16,26,680,&lv_font_montserrat_24,0x5F6368);
 }
 static void week(){
-  time_t now=time(nullptr),start=core::monday(now,requestedWeek);
+  time_t now=time(nullptr),start=core::sunday(now,requestedWeek);
   constexpr int gutter=52,col=105;
   lv_label_set_text(calendarDate,(dateText(start,"%b %d")+" - "+dateText(core::addDays(start,6),"%b %d, %Y")).c_str());
   int allCount[7]={};int maxAll=0;
@@ -274,14 +329,14 @@ static void calendarUpdate(){
   if(!calendarBody)return;
   // Do not destroy clickable event widgets underneath an open event-details modal.
   if(modal)return;
-  time_t now=time(nullptr),want=core::monday(now,requestedWeek);
+  time_t now=time(nullptr),want=core::sunday(now,requestedWeek);
   bool preserve=contentScroller && shownWeek==want && renderedWeek==weekView;
   int scroll=preserve?lv_obj_get_scroll_y(contentScroller):0;
   lv_obj_clean(calendarBody);contentScroller=nullptr;shownWeek=want;
   bool matches=snapshot.calendarLoaded && snapshot.calendarWeek==want;
   String status;
   if(now<1700000000){label(calendarBody,"Waiting for time sync",24,60,740,&lv_font_montserrat_24,INK);status="Connect Wi-Fi to set the clock";}
-  else if(!matches){label(calendarBody,snapshot.calendarError.isEmpty()?"Loading calendar...":snapshot.calendarError,24,60,740,&lv_font_montserrat_20,INK);status="Swipe left to return to Weather";}
+  else if(!matches){label(calendarBody,snapshot.calendarError.isEmpty()?"Waiting for next sync. Tap Refresh to load this week now.":snapshot.calendarError,24,60,740,&lv_font_montserrat_20,INK);status="Swipe left to return to Weather";}
   else{
     if(weekView)week();else {lv_label_set_text(calendarDate,"");agenda();}
     status=(snapshot.calendarError.isEmpty()?String("Updated ")+String((millis()-snapshot.calendarReceived)/60000)+" min ago":String("STALE • ")+snapshot.calendarError);
@@ -302,29 +357,62 @@ static void build(){
   lv_obj_t*old=lv_scr_act();lv_scr_load(root);if(old!=root)lv_obj_del(old);
   redraw=false;lastMinute=0;calendarBody=page==0?calendarBody:nullptr;
 }
-void uiSetDimming(int percent){if(dimmer)lv_obj_set_style_bg_opa(dimmer,(100-std::max(20,std::min(100,percent)))*2,0);}
+void uiSetDimming(int percent) {
+  if (!dimmer) return;
+  if (percent >= 100) {
+    lv_obj_add_flag(dimmer, LV_OBJ_FLAG_HIDDEN);
+  } else {
+    lv_obj_set_style_bg_opa(dimmer, (100 - std::max(20, percent)) * 2, 0);
+    lv_obj_clear_flag(dimmer, LV_OBJ_FLAG_HIDDEN);
+  }
+}
 void uiBegin(){
   build();dimmer=box(lv_layer_sys(),0,0,800,480,0x000000,0);lv_obj_clear_flag(dimmer,LV_OBJ_FLAG_CLICKABLE);uiSetDimming(settings.brightness);
 }
 void uiTouch(bool pressed,int x,int y){
-  static bool down=false;static int sx=0,sy=0,ex=0,ey=0;static uint32_t at=0;
-  if(pressed){if(!down){sx=x;sy=y;at=millis();down=true;}ex=x;ey=y;}
-  else if(down){down=false;int dx=ex-sx,dy=ey-sy;
+  static int sx=0,sy=0,ex=0,ey=0;static uint32_t at=0;
+  if(pressed){if(!touchDown){sx=x;sy=y;at=millis();touchDown=true;}ex=x;ey=y;}
+  else if(touchDown){touchDown=false;int dx=ex-sx,dy=ey-sy;
     bool editing=modal || (page==2 && sy>=258 && sy<=310);
     if(!editing && millis()-at<1200 && abs(dx)>=100 && abs(dx)>abs(dy)*1.6f){int next=page+(dx>0?-1:1);if(next>=0 && next<=2)navigation=dx>0?-1:1;}
   }
 }
 void uiTick(){
   if(navigation){page+=navigation;navigation=0;redraw=true;}
-  if(redraw)build();
-  uint32_t now=millis();if(now-lastTick<1000)return;lastTick=now;
-  // LVGL is touched only on this task. Network task publishes snapshots behind a mutex.
-  xSemaphoreTake(stateMutex,portMAX_DELAY);snapshot=shared;xSemaphoreGive(stateMutex);
+  const bool rebuilt = redraw;
+  if (rebuilt) build();
+  const uint32_t now = millis();
+  if (!rebuilt && now - lastTick < 1000) return;
+  lastTick = now;
+
+  const bool updateCalendar = page == 0 && !modal && !touchDown &&
+    (!contentScroller || !lv_obj_is_scrolling(contentScroller));
+  xSemaphoreTake(stateMutex, portMAX_DELAY);
+  if (page == 1) {
+    if (shared.weather.loaded != snapshot.weather.loaded ||
+        shared.weather.received != snapshot.weather.received) {
+      snapshot.weather = shared.weather;
+    }
+    snapshot.weatherError = shared.weatherError;
+  }
+  if (updateCalendar) {
+    if (shared.calendarLoaded != snapshot.calendarLoaded ||
+        shared.calendarWeek != snapshot.calendarWeek ||
+        shared.calendarReceived != snapshot.calendarReceived) {
+      snapshot.events = shared.events;
+    }
+    snapshot.calendarLoaded = shared.calendarLoaded;
+    snapshot.calendarWeek = shared.calendarWeek;
+    snapshot.calendarReceived = shared.calendarReceived;
+    snapshot.calendarError = shared.calendarError;
+    snapshot.truncated = shared.truncated;
+  }
+  xSemaphoreGive(stateMutex);
   time_t clock=time(nullptr);String clockText=clock>1700000000?dateText(clock,"%H:%M"):"--:--";
-  clockText+=WiFi.status()==WL_CONNECTED?String("  ")+LV_SYMBOL_WIFI:"  !";lv_label_set_text(clockLabel,clockText.c_str());
+  clockText+=WiFi.status()==WL_CONNECTED?String("  ")+LV_SYMBOL_WIFI:"  !";updateLabel(clockLabel,clockText.c_str());
   if(page==1)weatherUpdate();
   if(snapshot.calendarError!=lastCalendarError){calendarDirty=true;lastCalendarError=snapshot.calendarError;}
-  if(page==0 && !modal && (calendarDirty || lastCalendar!=snapshot.calendarReceived || lastMinute!=clock/60 || shownWeek!=core::monday(clock,requestedWeek))){
+  if(updateCalendar && (calendarDirty || lastCalendar!=snapshot.calendarReceived || lastMinute!=clock/60 || shownWeek!=core::sunday(clock,requestedWeek))){
     calendarUpdate();lastCalendar=snapshot.calendarReceived;lastMinute=clock/60;
   }
 }

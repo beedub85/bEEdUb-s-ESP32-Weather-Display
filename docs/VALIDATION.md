@@ -4,7 +4,7 @@ Date: 2026-11-10.
 
 ## Automated checks completed
 
-- Host C++ tests passed: local-day and Monday/week boundaries, spring 23-hour and fall 25-hour DST days, all-day exclusive end dates, overlapping event columns, events crossing midnight, metric/imperial conversions, compass headings, and missing-direction handling.
+- Host C++ tests passed: local-day and Sunday/week boundaries, spring 23-hour and fall 25-hour DST days, all-day exclusive end dates, overlapping event columns, events crossing midnight, metric/imperial conversions, compass headings, and missing-direction handling.
 - Google Apps Script tests passed against mocked Google services: token rejection before Calendar API access, range limits, recurring-event expansion request, multiple calendars, Google event colors, all-day date preservation, bounded event count/pagination, and sanitized service errors.
 - Native LVGL rendering passed for Weather, Calendar Today, Calendar Week, and Settings using the **actual `src/ui.cpp`** with mock hardware/network data. Swipe page ordering, the brightness-slider swipe guard, scroll-position preservation during refresh, modal navigation blocking, and time-zone selection passed. Keyboard and time-zone picker layouts were also rendered. Condition-icon integration renders verify rain priority, sunny/partly cloudy/cloudy light estimates, low light, unavailable light readings, and stale-data fallback. The test also checks that the removed page navigation buttons are absent. Included PNGs are outputs of the native renderer, not hardware captures.
 

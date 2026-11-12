@@ -1,9 +1,13 @@
 #pragma once
 #include <Arduino.h>
+#include <atomic>
 #include <lvgl.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 #include "core.hpp"
+
+constexpr uint32_t weatherPollIntervalMs = 5 * 60 * 1000;
+constexpr uint32_t weatherStaleAfterMs = weatherPollIntervalMs + 30 * 1000;
 struct Settings {
   String ssid, password, station="http://192.168.2.149", calendarUrl, calendarToken;
   String timezone="CST6CDT,M3.2.0,M11.1.0"; // Central with DST; editable in Settings
@@ -33,7 +37,7 @@ extern Settings settings;
 extern State shared;
 extern SemaphoreHandle_t stateMutex;
 extern volatile int requestedWeek;
-extern volatile uint32_t requestVersion;
+extern std::atomic<bool> calendarRefreshRequested;
 void loadSettings();
 void saveSettings();
 void startNetwork();

@@ -7,9 +7,11 @@ static time_t at(int year,int month,int day,int hour=0,int min=0){tm t={};t.tm_y
 static Event timed(time_t start,time_t end){Event e;e.start=start;e.end=end;return e;}
 int main(){
  setenv("TZ","CST6CDT,M3.2.0,M11.1.0",1);tzset();
- assert(monday(at(2026,11,10,12))==at(2026,11,9));
- assert(monday(at(2026,11,15))==at(2026,11,9));
- assert(monday(at(2026,11,16),-1)==at(2026,11,9));
+ assert(sunday(at(2026,11,10,12))==at(2026,11,8));
+ assert(sunday(at(2026,11,14,23,59))==at(2026,11,8));
+ assert(sunday(at(2026,11,15))==at(2026,11,15));
+ assert(sunday(at(2026,11,16),-1)==at(2026,11,8));
+ assert(sunday(at(2026,3,8),1)==at(2026,3,15));
  assert(addDays(at(2026,3,8),1)-at(2026,3,8)==23*3600); // spring DST day
  assert(addDays(at(2026,11,1),1)-at(2026,11,1)==25*3600); // fall DST day
  assert(dateEpoch("2026-11-10")==at(2026,11,10));
