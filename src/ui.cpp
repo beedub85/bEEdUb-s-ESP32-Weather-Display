@@ -16,8 +16,8 @@ static String lastCalendarError;
 static lv_obj_t *fields[3],*keyboard,*form,*contentScroller=nullptr;
 static bool renderedWeek=false;
 static Settings draft;
-static const char*tzNames[]={"Central (Winnipeg)","Eastern (Toronto)","Saskatchewan (no DST)","Mountain (Calgary)","Pacific (Vancouver)","Atlantic (Halifax)","Newfoundland (St. John's)","Yukon (no DST)","UTC"};
-static const char*tzCodes[]={"CST6CDT,M3.2.0,M11.1.0","EST5EDT,M3.2.0,M11.1.0","CST6","MST7MDT,M3.2.0,M11.1.0","PST8PDT,M3.2.0,M11.1.0","AST4ADT,M3.2.0,M11.1.0","NST3:30NDT,M3.2.0,M11.1.0","MST7","UTC0"};
+static const char*tzNames[]={"Manitoba (Winnipeg)","Eastern (Toronto)","Saskatchewan (no DST)","Mountain (Calgary)","Pacific (Vancouver)","Atlantic (Halifax)","Newfoundland (St. John's)","Yukon (no DST)","UTC"};
+static const char*tzCodes[]={core::winnipegTimeZone,"EST5EDT,M3.2.0,M11.1.0","CST6","MST7MDT,M3.2.0,M11.1.0","PST8PDT,M3.2.0,M11.1.0","AST4ADT,M3.2.0,M11.1.0","NST3:30NDT,M3.2.0,M11.1.0","MST7","UTC0"};
 static String timezoneName(){for(size_t i=0;i<9;++i)if(settings.timezone==tzCodes[i])return tzNames[i];return "Custom time zone";}
 
 static void updateLabel(lv_obj_t *label, const char *text) {
@@ -224,7 +224,7 @@ static void edit(lv_event_t *e){
   if(editKind==0){fields[0]=input(form,"Network name (2.4 GHz)",draft.ssid,8,false,32);fields[1]=input(form,"Wi-Fi password",draft.password,96,true,63);}
   if(editKind==1)fields[0]=input(form,"Base URL, for example http://192.168.2.149",draft.station,8,false,200);
   if(editKind==2){fields[0]=input(form,"Apps Script web app URL ending in /exec",draft.calendarUrl,8,false,400);fields[1]=input(form,"Bridge token (from your own Apps Script setup)",draft.calendarToken,96,true,128);}
-  if(editKind==3)fields[0]=input(form,"Central: CST6CDT,M3.2.0,M11.1.0  |  Eastern: EST5EDT,M3.2.0,M11.1.0",draft.timezone,8,false,100);
+  if(editKind==3)fields[0]=input(form,"Manitoba: MBT5  |  Eastern: EST5EDT,M3.2.0,M11.1.0",draft.timezone,8,false,100);
   lv_keyboard_set_textarea(keyboard,fields[0]);lv_obj_invalidate(modal);
 }
 static void unitsChanged(lv_event_t *e){

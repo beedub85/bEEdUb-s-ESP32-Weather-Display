@@ -3,6 +3,7 @@
 #include <cmath>
 #include <cstdio>
 #include <ctime>
+#include <string_view>
 #include <string>
 #include <vector>
 #if defined(ARDUINO_ARCH_ESP32)
@@ -10,6 +11,13 @@
 #include <cstdlib>
 #endif
 namespace core {
+inline constexpr char winnipegTimeZone[] = "MBT5";
+
+inline const char *normalizeTimeZone(const char *saved) {
+  constexpr std::string_view oldWinnipegRule = "CST6CDT,M3.2.0,M11.1.0";
+  return saved == oldWinnipegRule ? winnipegTimeZone : saved;
+}
+
 #if defined(ARDUINO_ARCH_ESP32)
 // Calendar content is kept in external RAM; snapshots must not exhaust Wi-Fi/TLS SRAM.
 template<class T> struct ExternalAllocator {

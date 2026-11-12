@@ -17,7 +17,8 @@ void loadSettings(){
   settings.ssid=p.getString("ssid","");settings.password=p.getString("password","");
   settings.station=p.getString("station","http://192.168.2.149");
   settings.calendarUrl=p.getString("calurl","");settings.calendarToken=p.getString("caltoken","");
-  settings.timezone=p.getString("tz","CST6CDT,M3.2.0,M11.1.0");
+  const String savedTimezone = p.getString("tz", core::winnipegTimeZone);
+  settings.timezone = core::normalizeTimeZone(savedTimezone.c_str());
   settings.imperial=p.getBool("imperial",false);settings.brightness=p.getInt("dim",100);p.end();
   setenv("TZ",settings.timezone.c_str(),1);tzset();
 }

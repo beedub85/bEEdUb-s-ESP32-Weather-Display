@@ -22,6 +22,13 @@ int main(){
  assert(screen.acceptsTouch(true, wake + 40));
  screen.update(wake + 40 + ScreenIdle::timeoutMs);
  assert(!screen.isSleeping()); // A held touch keeps the screen on.
+ assert(std::string_view(normalizeTimeZone("CST6CDT,M3.2.0,M11.1.0")) == "MBT5");
+ assert(std::string_view(normalizeTimeZone("CST6")) == "CST6");
+ setenv("TZ", winnipegTimeZone, 1);
+ tzset();
+ assert(at(2026,11,12,18,28) == 1794526080);
+ assert(addDays(at(2026,11,1),1) - at(2026,11,1) == 86400);
+ assert(addDays(at(2027,3,14),1) - at(2027,3,14) == 86400);
  setenv("TZ","CST6CDT,M3.2.0,M11.1.0",1);tzset();
  assert(sunday(at(2026,11,10,12))==at(2026,11,8));
  assert(sunday(at(2026,11,14,23,59))==at(2026,11,8));
