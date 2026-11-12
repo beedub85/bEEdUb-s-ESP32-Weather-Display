@@ -1,4 +1,5 @@
 #include "core.hpp"
+#include "screen_idle.hpp"
 #include <cassert>
 #include <cstdlib>
 #include <iostream>
@@ -6,6 +7,21 @@ using namespace core;
 static time_t at(int year,int month,int day,int hour=0,int min=0){tm t={};t.tm_year=year-1900;t.tm_mon=month-1;t.tm_mday=day;t.tm_hour=hour;t.tm_min=min;t.tm_isdst=-1;return mktime(&t);}
 static Event timed(time_t start,time_t end){Event e;e.start=start;e.end=end;return e;}
 int main(){
+ ScreenIdle screen;
+ const uint32_t start = UINT32_MAX - 1000;
+ screen.begin(start);
+ screen.update(start + ScreenIdle::timeoutMs - 1);
+ assert(!screen.isSleeping());
+ screen.update(start + ScreenIdle::timeoutMs);
+ assert(screen.isSleeping());
+ const uint32_t wake = start + ScreenIdle::timeoutMs + 1;
+ assert(!screen.acceptsTouch(true, wake));
+ assert(!screen.isSleeping());
+ assert(!screen.acceptsTouch(true, wake + 20));
+ assert(!screen.acceptsTouch(false, wake + 30));
+ assert(screen.acceptsTouch(true, wake + 40));
+ screen.update(wake + 40 + ScreenIdle::timeoutMs);
+ assert(!screen.isSleeping()); // A held touch keeps the screen on.
  setenv("TZ","CST6CDT,M3.2.0,M11.1.0",1);tzset();
  assert(sunday(at(2026,11,10,12))==at(2026,11,8));
  assert(sunday(at(2026,11,14,23,59))==at(2026,11,8));

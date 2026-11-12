@@ -58,3 +58,5 @@ These are rendered from the UI with sample data. Actual photos will be included 
 Pinned dependencies: pioarduino Espressif32 53.03.11 / Arduino ESP32 3.1.1 (ESP-IDF 5.3); ESP32_Display_Panel 1.0.3; ESP32_IO_Expander 1.0.1; esp-lib-utils 0.1.2; LVGL 8.4.0; ArduinoJson 7.4.2.
 
 Hardware references: https://docs.waveshare.com/ESP32-S3-Touch-LCD-7 and https://github.com/esp-arduino-libs/ESP32_Display_Panel . Station source: https://github.com/beedub85/weatherstation/tree/esp32-support .
+
+The backlight switches off after 30 seconds without touch input. Touch anywhere to wake it. Weather and calendar sync continue while the screen is dark.
