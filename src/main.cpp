@@ -1,5 +1,4 @@
 #include <Arduino.h>
-#include <driver/i2c.h>
 #include <esp_display_panel.hpp>
 #include <lvgl.h>
 #include <esp_heap_caps.h>
@@ -13,19 +12,8 @@ static lv_indev_drv_t inputDriver;
 static lv_disp_t *display;
 static ScreenIdle screenIdle;
 static bool backlightOff = false;
-static constexpr int screenWidth = 800;
-static constexpr int screenHeight = 480;
 static void flush(lv_disp_drv_t *d,const lv_area_t *a,lv_color_t *pixels) {
-  const int width = a->x2 - a->x1 + 1;
-  const int height = a->y2 - a->y1 + 1;
-  int x = a->x1;
-  int y = a->y1;
-  if (settings.rotateScreen) {
-    x = screenWidth - 1 - a->x2;
-    y = screenHeight - 1 - a->y2;
-    std::reverse(pixels, pixels + width * height);
-  }
-  board->getLCD()->drawBitmap(x, y, width, height, reinterpret_cast<const uint8_t *>(pixels));
+  board->getLCD()->drawBitmap(a->x1,a->y1,a->x2-a->x1+1,a->y2-a->y1+1,(const uint8_t*)pixels);
   lv_disp_flush_ready(d); // RGB drawBitmap synchronously copies to its framebuffer.
 }
 static void touch(lv_indev_drv_t *,lv_indev_data_t *data) {
@@ -33,10 +21,10 @@ static void touch(lv_indev_drv_t *,lv_indev_data_t *data) {
   const int count = board->getTouch()->readPoints(&point, 1, 0);
   const bool accepted = screenIdle.acceptsTouch(count > 0, millis());
   if (accepted) {
-    data->point.x = settings.rotateScreen ? screenWidth - 1 - point.x : point.x;
-    data->point.y = settings.rotateScreen ? screenHeight - 1 - point.y : point.y;
+    data->point.x = point.x;
+    data->point.y = point.y;
     data->state = LV_INDEV_STATE_PRESSED;
-    uiTouch(true, data->point.x, data->point.y);
+    uiTouch(true, point.x, point.y);
   } else {
     data->state = LV_INDEV_STATE_RELEASED;
     uiTouch(false, 0, 0);
@@ -73,27 +61,6 @@ static void updateScreenPower() {
     lv_timer_ready(refreshTimer);
   }
 }
-static void updateBattery() {
-  static uint32_t lastRead = 0;
-  static bool sampled = false;
-  const uint32_t now = millis();
-  if (sampled && now - lastRead < 5000) return;
-  sampled = true;
-  lastRead = now;
-
-  // The display board already owns I2C0. Reuse its driver and leave the gauge read-only.
-  constexpr uint8_t gaugeAddress = 0x36;
-  constexpr uint8_t socRegister = 0x04;
-  uint8_t soc[2]{};
-  if (i2c_master_write_read_device(I2C_NUM_0, gaugeAddress, &socRegister, 1,
-                                   soc, sizeof(soc), pdMS_TO_TICKS(20)) != ESP_OK) {
-    uiSetBatteryPercent(-1);
-    return;
-  }
-  const unsigned raw = (static_cast<unsigned>(soc[0]) << 8) | soc[1];
-  uiSetBatteryPercent(raw == 0xffff ? -1 : static_cast<int>(std::min(100u, (raw + 128) / 256)));
-}
-
 void setup() {
   Serial.setRxBufferSize(1024);
   Serial.begin(115200);
@@ -103,10 +70,10 @@ void setup() {
   loadSettings();
   board=new Board(); assert(board->init()); assert(board->begin());
   lv_init();
-  auto *buffer=(lv_color_t*)heap_caps_malloc(screenWidth*24*sizeof(lv_color_t),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+  auto *buffer=(lv_color_t*)heap_caps_malloc(800*24*sizeof(lv_color_t),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
   assert(buffer);
-  lv_disp_draw_buf_init(&drawBuffer,buffer,nullptr,screenWidth*24);
-  lv_disp_drv_init(&displayDriver);displayDriver.hor_res=screenWidth;displayDriver.ver_res=screenHeight;
+  lv_disp_draw_buf_init(&drawBuffer,buffer,nullptr,800*24);
+  lv_disp_drv_init(&displayDriver);displayDriver.hor_res=800;displayDriver.ver_res=480;
   displayDriver.flush_cb=flush;displayDriver.draw_buf=&drawBuffer;display=lv_disp_drv_register(&displayDriver);
   lv_indev_drv_init(&inputDriver);inputDriver.type=LV_INDEV_TYPE_POINTER;inputDriver.read_cb=touch;lv_indev_drv_register(&inputDriver);
   uiBegin();startNetwork();
@@ -114,10 +81,7 @@ void setup() {
   Serial.printf("Weather Display 0.1.0 | Flash %u MB | PSRAM %u MB\n",ESP.getFlashChipSize()/1048576,ESP.getPsramSize()/1048576);
 }
 void loop() {
-  if (!backlightOff) {
-    updateBattery();
-    uiTick();
-  }
+  if (!backlightOff) uiTick();
   lv_timer_handler();
   updateScreenPower();
   uiCalendarUsbExpire();

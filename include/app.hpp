@@ -15,7 +15,6 @@ struct Settings {
   String timezone=core::winnipegTimeZone;
   String postalCode, printRoomUrl, printRoomKey;
   bool imperial=false;
-  bool rotateScreen=false;
   int brightness=100;
   uint32_t screenTimeoutSeconds = ScreenIdle::defaultTimeoutSeconds;
 };
@@ -95,6 +94,3 @@ void uiSetDimming(int percent);
 enum class CalendarUsbResult { Pending, Saved, Invalid };
 CalendarUsbResult uiCalendarUsbReceive(char byte);
 void uiCalendarUsbExpire();
-
-// Negative means the battery gauge is unavailable.
-void uiSetBatteryPercent(int percent);

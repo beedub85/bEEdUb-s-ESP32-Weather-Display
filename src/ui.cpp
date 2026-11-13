@@ -2,8 +2,6 @@
 #include <WiFi.h>
 #include "weather_icons.hpp"
 static constexpr uint32_t BG=0x081A28,CARD=0x142E40,TEXT=0xF3F7FA,MUTED=0xA9BDCA,TEAL=0x22D1BD,BLUE=0x1A73E8,INK=0x202124;
-static lv_obj_t *batteryLabel, *modalBatteryLabel;
-static int batteryPercent = -1;
 static lv_obj_t *root,*clockLabel,*statusLabel,*calendarBody,*calendarDate,*modal=nullptr,*dimmer;
 static lv_obj_t *weatherValues[7],*weatherSub[7],*weatherImages[7],*conditionLabel;
 static icons::State iconStates[7];
@@ -62,27 +60,6 @@ static lv_obj_t* label(lv_obj_t*p,const String&s,int x,int y,int w,const lv_font
   auto*l=lv_label_create(p);lv_obj_set_pos(l,x,y);lv_obj_set_width(l,w);lv_label_set_text(l,s.c_str());
   lv_obj_set_style_text_color(l,color(c),0);lv_obj_set_style_text_font(l,f,0);lv_label_set_long_mode(l,LV_LABEL_LONG_WRAP);return l;
 }
-static void updateBatteryLabel(lv_obj_t *indicator) {
-  if (!indicator) return;
-  const String caption = String(LV_SYMBOL_BATTERY_FULL) + " " +
-      (batteryPercent < 0 ? String("--%") : String(batteryPercent) + "%");
-  updateLabel(indicator, caption.c_str());
-}
-
-void uiSetBatteryPercent(int percent) {
-  if (percent == batteryPercent) return;
-  batteryPercent = percent;
-  updateBatteryLabel(batteryLabel);
-  updateBatteryLabel(modalBatteryLabel);
-}
-
-static lv_obj_t *batteryIndicator(lv_obj_t *parent, int x, uint32_t tint) {
-  auto *indicator = label(parent, "", x, 20, 100, &lv_font_montserrat_16, tint);
-  lv_obj_set_style_text_align(indicator, LV_TEXT_ALIGN_RIGHT, 0);
-  updateBatteryLabel(indicator);
-  return indicator;
-}
-
 static lv_obj_t* button(lv_obj_t*p,const String&s,int x,int y,int w,int h,lv_event_cb_t cb,void *data=nullptr,uint32_t bg=BLUE){
   auto*b=lv_btn_create(p);lv_obj_set_pos(b,x,y);lv_obj_set_size(b,w,h);lv_obj_set_style_bg_color(b,color(bg),0);
   lv_obj_set_style_radius(b,10,0);lv_obj_set_style_shadow_width(b,0,0);lv_obj_set_style_pad_all(b,0,0);
@@ -94,14 +71,12 @@ static String dateText(time_t t,const char*pattern){char b[80];tm d=*localtime(&
 static String temp(float n){return fmt(core::temp(n,settings.imperial))+ (settings.imperial?"°F":"°C");}
 static String speed(float n){return fmt(core::wind(n,settings.imperial),0)+(settings.imperial?" mph":" km/h");}
 static String rain(float n){return fmt(core::rain(n,settings.imperial),settings.imperial?2:1)+(settings.imperial?" in":" mm");}
-static void closeModal(){modalBatteryLabel=nullptr;if(weatherPanel==WeatherPanel::Today)todayOverviewOpen.store(false);if(weatherPanel==WeatherPanel::PrintRoom)printRoomOpen.store(false);weatherPanel=WeatherPanel::None;if(calendarUsbStatus){calendarUsbStatus=nullptr;clearCalendarUsbLine();}if(modal){lv_obj_del(modal);modal=nullptr;lv_obj_invalidate(lv_scr_act());}keyboard=nullptr;}
+static void closeModal(){if(weatherPanel==WeatherPanel::Today)todayOverviewOpen.store(false);if(weatherPanel==WeatherPanel::PrintRoom)printRoomOpen.store(false);weatherPanel=WeatherPanel::None;if(calendarUsbStatus){calendarUsbStatus=nullptr;clearCalendarUsbLine();}if(modal){lv_obj_del(modal);modal=nullptr;lv_obj_invalidate(lv_scr_act());}keyboard=nullptr;}
 static void dismiss(lv_event_t*){closeModal();}
 static lv_obj_t* newModal(const String &title){
   closeModal();modal=box(lv_layer_top(),0,0,800,480,0x07131F,0);
   label(modal,title,22,18,580,&lv_font_montserrat_24);
-  button(modal,"Close",684,10,96,44,dismiss,nullptr,CARD);
-  modalBatteryLabel = batteryIndicator(modal, 450, MUTED);
-  return modal;
+  button(modal,"Close",684,10,96,44,dismiss,nullptr,CARD);return modal;
 }
 static void eventDetails(lv_event_t *ev){
   if(navigation)return;
@@ -668,7 +643,6 @@ static void edit(lv_event_t *e){
   const char*titles[]={"Wi-Fi setup","Weather station address","Google Calendar setup","Time zone (POSIX)","Postal code","Print Room bridge"};
   auto*m=newModal(titles[editKind]);button(m,"Save",570,10,96,44,editorSave);
   if(editKind==2)button(m,"Set up over USB",396,10,158,44,startCalendarUsb,nullptr,CARD);
-  lv_obj_set_x(modalBatteryLabel, editKind == 2 ? 280 : 450);
   form=box(m,24,72,752,164,CARD);lv_obj_add_flag(form,LV_OBJ_FLAG_SCROLLABLE);lv_obj_set_scroll_dir(form,LV_DIR_VER);
   keyboard=lv_keyboard_create(m);lv_obj_set_align(keyboard,LV_ALIGN_TOP_LEFT);lv_obj_set_pos(keyboard,0,252);lv_obj_set_size(keyboard,800,228);
   if(editKind==0){fields[0]=input(form,"Network name (2.4 GHz)",draft.ssid,8,false,32);fields[1]=input(form,"Wi-Fi password",draft.password,96,true,63);}
@@ -722,34 +696,14 @@ static void openScreenTimeout(lv_event_t *) {
   }
 }
 
-static void rotationChanged(lv_event_t *event) {
-  const bool enabled = lv_obj_has_state(lv_event_get_target(event), LV_STATE_CHECKED);
-  xSemaphoreTake(stateMutex, portMAX_DELAY);
-  settings.rotateScreen = enabled;
-  xSemaphoreGive(stateMutex);
-  saveSettings();
-  lv_obj_invalidate(lv_scr_act());
-}
-
-static constexpr int settingsTop = 61;
-static constexpr int settingsRowPitch = 41;
-static constexpr int settingsRowHeight = 38;
-static constexpr int dimmingTop = settingsTop + 3 * settingsRowPitch;
-
 static void settingsScreen(){
-  const char*names[]={"Wi-Fi","Weather station","Google Calendar","Display dimming","Imperial units","Time zone","Screen timeout","Postal code","Print Room","Rotate screen 180°"};
-  String values[]={settings.ssid.isEmpty()?"Tap to connect":settings.ssid,settings.station,settings.calendarUrl.isEmpty()?"Tap to link":"Configured", "", "°F / mph / in", timezoneName(), screenTimeoutLabel(settings.screenTimeoutSeconds), settings.postalCode.isEmpty() ? "Tap to set location" : settings.postalCode, settings.printRoomUrl.isEmpty() ? "Tap to set bridge" : settings.printRoomUrl, ""};
-  int kinds[]={0,1,2,-1,-1,3,-1,4,5,-1};
-  for(int i=0;i<10;++i){auto*b=box(root,20,settingsTop+i*settingsRowPitch,760,settingsRowHeight,CARD);
+  const char*names[]={"Wi-Fi","Weather station","Google Calendar","Display dimming","Imperial units","Time zone","Screen timeout","Postal code","Print Room"};
+  String values[]={settings.ssid.isEmpty()?"Tap to connect":settings.ssid,settings.station,settings.calendarUrl.isEmpty()?"Tap to link":"Configured", "", "°F / mph / in", timezoneName(), screenTimeoutLabel(settings.screenTimeoutSeconds), settings.postalCode.isEmpty() ? "Tap to set location" : settings.postalCode, settings.printRoomUrl.isEmpty() ? "Tap to set bridge" : settings.printRoomUrl};
+  int kinds[]={0,1,2,-1,-1,3,-1,4,5};
+  for(int i=0;i<9;++i){auto*b=box(root,20,61+i*45,760,41,CARD);
     label(b,names[i],16,11,220,&lv_font_montserrat_18);
     if(i==3){auto*s=lv_slider_create(b);lv_obj_set_pos(s,300,20);lv_obj_set_size(s,416,10);lv_slider_set_range(s,20,100);lv_slider_set_value(s,settings.brightness,LV_ANIM_OFF);lv_obj_add_event_cb(s,brightnessChanged,LV_EVENT_VALUE_CHANGED,nullptr);lv_obj_add_event_cb(s,brightnessChanged,LV_EVENT_RELEASED,nullptr);}
-    else if(i==4 || i==9){
-      if(i==4) label(b,values[i],300,11,320,&lv_font_montserrat_14,MUTED);
-      auto *toggle = lv_switch_create(b);
-      lv_obj_set_pos(toggle,680,4);lv_obj_set_size(toggle,60,30);
-      if(i==4 ? settings.imperial : settings.rotateScreen) lv_obj_add_state(toggle,LV_STATE_CHECKED);
-      lv_obj_add_event_cb(toggle,i==4?unitsChanged:rotationChanged,LV_EVENT_VALUE_CHANGED,nullptr);
-    }
+    else if(i==4){label(b,values[i],300,15,320,&lv_font_montserrat_14,MUTED);auto*s=lv_switch_create(b);lv_obj_set_pos(s,680,7);lv_obj_set_size(s,60,30);if(settings.imperial)lv_obj_add_state(s,LV_STATE_CHECKED);lv_obj_add_event_cb(s,unitsChanged,LV_EVENT_VALUE_CHANGED,nullptr);}
     else{auto*l=label(b,values[i]+"  >",250,16,490,&lv_font_montserrat_14,TEAL);lv_label_set_long_mode(l,LV_LABEL_LONG_DOT);lv_obj_add_flag(b,LV_OBJ_FLAG_CLICKABLE);lv_obj_add_event_cb(b,i==6?openScreenTimeout:edit,LV_EVENT_CLICKED,(void*)(intptr_t)kinds[i]);}
   }
 }
@@ -858,8 +812,7 @@ static void build(){
   contentScroller=nullptr;
   root=lv_obj_create(nullptr);lv_obj_set_style_bg_color(root,color(page==0?0xFFFFFF:BG),0);lv_obj_set_style_pad_all(root,0,0);lv_obj_set_style_border_width(root,0,0);lv_obj_clear_flag(root,LV_OBJ_FLAG_SCROLLABLE);
   label(root,page==0?"Calendar":page==1?"Weather":"Settings",22,16,540,&lv_font_montserrat_28,page==0?INK:TEXT);
-  clockLabel=label(root,"--:--",555,20,123,&lv_font_montserrat_20,page==0?INK:TEXT);
-  batteryLabel = batteryIndicator(root, 680, page==0?INK:MUTED);
+  clockLabel=label(root,"--:--",626,20,156,&lv_font_montserrat_20,page==0?INK:TEXT);
   if(page==0)calendarScreen();else if(page==1)weatherScreen();else settingsScreen();
   lv_obj_t*old=lv_scr_act();lv_scr_load(root);if(old!=root)lv_obj_del(old);
   redraw=false;lastMinute=0;calendarBody=page==0?calendarBody:nullptr;
@@ -880,7 +833,7 @@ void uiTouch(bool pressed,int x,int y){
   static int sx=0,sy=0,ex=0,ey=0;static uint32_t at=0;
   if(pressed){if(!touchDown){sx=x;sy=y;at=millis();touchDown=true;}ex=x;ey=y;}
   else if(touchDown){touchDown=false;int dx=ex-sx,dy=ey-sy;
-    bool editing=modal || (page==2 && sy>=dimmingTop && sy<dimmingTop+settingsRowHeight);
+    bool editing=modal || (page==2 && sy>=196 && sy<237);
     if(!editing && millis()-at<1200 && abs(dx)>=100 && abs(dx)>abs(dy)*1.6f){int next=page+(dx>0?-1:1);if(next>=0 && next<=2)navigation=dx>0?-1:1;}
   }
 }
