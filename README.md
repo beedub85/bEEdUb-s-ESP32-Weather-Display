@@ -22,6 +22,10 @@ Weather data source: [Environment and Climate Change Canada, City Page Weather](
 
 Tap **Print Room** on the Weather dashboard for read-only printer progress, status, temperatures, and optional room sensors. Set up the local Home Assistant bridge and enter its address under **Settings → Print Room**. [Print Room setup](docs/PRINT_ROOM_SETUP.md)
 
+### Battery indicator
+
+The top corner shows a percentage when an optional MAX17048 single-cell fuel gauge is available on the board's I²C bus (address `0x36`). The Waveshare battery connector supplies power, but the stock board does not provide a firmware-readable charge percentage. The default build shows `--%` and leaves gauge polling off. Once a MAX17048 is connected, uncomment `-DENABLE_MAX17048_GAUGE=1` under `build_flags` in `platformio.ini`, then rebuild and upload. A missing or unreadable gauge shows `--%`. The percentage is the gauge's estimated state of charge. Use a compatible gauge breakout with a protected single-cell battery and follow the breakout manufacturer's connection and polarity instructions.
+
 ## 1. Build and Upload
 1. Install VS Code and the PlatformIO IDE extension.
 2. Extract the ZIP and open the **weather-display** folder containing `platformio.ini` using PlatformIO → Open Project.

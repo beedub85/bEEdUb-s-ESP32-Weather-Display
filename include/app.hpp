@@ -94,3 +94,6 @@ void uiSetDimming(int percent);
 enum class CalendarUsbResult { Pending, Saved, Invalid };
 CalendarUsbResult uiCalendarUsbReceive(char byte);
 void uiCalendarUsbExpire();
+
+// Negative means the battery gauge is unavailable.
+void uiSetBatteryPercent(int percent);

@@ -25,7 +25,11 @@ int main(int argc,char**argv){
  time_t day=core::midnight(now);
  for(int i=0;i<5;++i){core::Event e;e.title=i%2?"Project planning":"Team meeting";e.location="Office";e.calendar="Personal";e.start=day+9*3600+i*90*60;e.end=e.start+3600;e.color=i%2?0x34A853:0x4285F4;shared.events.push_back(e);}
  core::Event all;all.title="All-day reminder";all.allDay=true;char dates[16];tm t=*localtime(&day);strftime(dates,16,"%Y-%m-%d",&t);all.startDate=dates;day=core::addDays(day,1);t=*localtime(&day);strftime(dates,16,"%Y-%m-%d",&t);all.endDate=dates;shared.events.push_back(all);
- uiBegin();frames();capture("weather.ppm");
+ uiBegin();frames();
+ assert(findLabel(lv_scr_act(), LV_SYMBOL_BATTERY_FULL " --%"));
+ uiSetBatteryPercent(74);
+ assert(findLabel(lv_scr_act(), LV_SYMBOL_BATTERY_FULL " 74%"));
+ capture("weather.ppm");
  // Tap each card through its LVGL event and verify that its details are scoped.
  struct CardCase { const char *title; const char *reading; };
  const CardCase cards[] = {
@@ -40,7 +44,7 @@ int main(int argc,char**argv){
    lv_event_send(lv_obj_get_parent(title), LV_EVENT_CLICKED, nullptr);
    auto *heading = findLabel(lv_layer_top(), card.title);
    assert(heading);
-   auto *body = lv_obj_get_child(lv_obj_get_parent(heading), 2);
+   auto *body = lv_obj_get_child(lv_obj_get_parent(heading), 3);
    const std::string readings = lv_label_get_text(lv_obj_get_child(body, 0));
    for (const auto &other : cards) {
      const bool containsReading = readings.find(other.reading) != std::string::npos;
@@ -176,6 +180,7 @@ int main(int argc,char**argv){
  printRoom.received = testMillis;
  openPanel("Print Room");
  assert(printRoomOpen.load());
+ assert(findLabel(lv_layer_top(), LV_SYMBOL_BATTERY_FULL " 74%"));
  assert(findLabel(lv_layer_top(), "68%"));
  capture("print-room.ppm");
  printRoom.status = "";

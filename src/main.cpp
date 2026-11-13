@@ -1,4 +1,7 @@
 #include <Arduino.h>
+#if defined(ENABLE_MAX17048_GAUGE) && ENABLE_MAX17048_GAUGE
+#include <driver/i2c.h>
+#endif
 #include <esp_display_panel.hpp>
 #include <lvgl.h>
 #include <esp_heap_caps.h>
@@ -61,6 +64,26 @@ static void updateScreenPower() {
     lv_timer_ready(refreshTimer);
   }
 }
+// This optional gauge shares I2C0 with touch. Keep reads off the UI task.
+#if defined(ENABLE_MAX17048_GAUGE) && ENABLE_MAX17048_GAUGE
+static std::atomic<int> batteryPercent{-1};
+
+static void batteryTask(void *) {
+  for (;;) {
+    constexpr uint8_t socRegister = 0x04;
+    uint8_t soc[2]{};
+    int percent = -1;
+    if (i2c_master_write_read_device(I2C_NUM_0, 0x36, &socRegister, 1,
+                                    soc, sizeof(soc), pdMS_TO_TICKS(20)) == ESP_OK) {
+      const unsigned raw = (static_cast<unsigned>(soc[0]) << 8) | soc[1];
+      if (raw != 0xffff) percent = std::min(100u, (raw + 128) / 256);
+    }
+    batteryPercent.store(percent, std::memory_order_relaxed);
+    vTaskDelay(pdMS_TO_TICKS(5000));
+  }
+}
+#endif
+
 void setup() {
   Serial.setRxBufferSize(1024);
   Serial.begin(115200);
@@ -77,11 +100,21 @@ void setup() {
   displayDriver.flush_cb=flush;displayDriver.draw_buf=&drawBuffer;display=lv_disp_drv_register(&displayDriver);
   lv_indev_drv_init(&inputDriver);inputDriver.type=LV_INDEV_TYPE_POINTER;inputDriver.read_cb=touch;lv_indev_drv_register(&inputDriver);
   uiBegin();startNetwork();
+#if defined(ENABLE_MAX17048_GAUGE) && ENABLE_MAX17048_GAUGE
+  if (xTaskCreatePinnedToCore(batteryTask, "battery", 3072, nullptr, 1, nullptr, 0) != pdPASS) {
+    Serial.println("Battery gauge task unavailable");
+  }
+#endif
   screenIdle.begin(millis());
   Serial.printf("Weather Display 0.1.0 | Flash %u MB | PSRAM %u MB\n",ESP.getFlashChipSize()/1048576,ESP.getPsramSize()/1048576);
 }
 void loop() {
-  if (!backlightOff) uiTick();
+  if (!backlightOff) {
+#if defined(ENABLE_MAX17048_GAUGE) && ENABLE_MAX17048_GAUGE
+    uiSetBatteryPercent(batteryPercent.load(std::memory_order_relaxed));
+#endif
+    uiTick();
+  }
   lv_timer_handler();
   updateScreenPower();
   uiCalendarUsbExpire();
