@@ -155,28 +155,35 @@ static String cityForPostalCode(const String &postal, String &error) {
     JsonDocument cities(&allocator), filter;
     filter["features"][0]["id"] = true;
     filter["features"][0]["geometry"]["coordinates"] = true;
-    const String url = String(cityPages) + "?f=json&limit=100&properties=name&bbox=" +
+    // Use the standard GeoMet bbox query without a collection-specific field projection.
+    const String url = String(cityPages) + "?f=json&limit=5&bbox=" +
         String(lon - radius / lonScale, 4) + "," + String(lat - radius, 4) + "," +
         String(lon + radius / lonScale, 4) + "," + String(lat + radius, 4);
-    if (!publicJson(url, cities, 60000, &filter, error)) {
-      error = String("Environment Canada location search: ") + error;
-      return "";
-    }
+    filter["numberMatched"] = true;
     double best = INFINITY;
     String id;
-    for (JsonObject city : cities["features"].as<JsonArray>()) {
-      const char *candidate = city["id"] | "";
-      if (strlen(candidate) > 20 || !*candidate || strspn(candidate, "abcdefghijklmnopqrstuvwxyz0123456789-") != strlen(candidate)) continue;
-      auto coordinates = city["geometry"]["coordinates"].as<JsonArray>();
-      if (coordinates.size() != 2) continue;
-      double dx = (coordinates[0].as<double>() - lon) * lonScale;
-      double dy = coordinates[1].as<double>() - lat;
-      const double distance = dx * dx + dy * dy;
-      // A point outside the search box cannot be closer than radius.
-      if (distance < best && distance <= radius * radius) {
-        best = distance;
-        id = candidate;
+    // Full city features include forecasts. Read small batches and retain only coordinates and IDs.
+    for (unsigned offset = 0; ; offset += 5) {
+      if (!publicJson(url + "&offset=" + String(offset), cities, 800000, &filter, error)) {
+        error = String("Environment Canada location search: ") + error;
+        return "";
       }
+      const auto features = cities["features"].as<JsonArray>();
+      for (JsonObject city : features) {
+        const char *candidate = city["id"] | "";
+        if (strlen(candidate) > 20 || !*candidate ||
+            strspn(candidate, "abcdefghijklmnopqrstuvwxyz0123456789-") != strlen(candidate)) continue;
+        auto coordinates = city["geometry"]["coordinates"].as<JsonArray>();
+        if (coordinates.size() != 2) continue;
+        const double dx = (coordinates[0].as<double>() - lon) * lonScale;
+        const double dy = coordinates[1].as<double>() - lat;
+        const double distance = dx * dx + dy * dy;
+        if (distance < best && distance <= radius * radius) {
+          best = distance;
+          id = candidate;
+        }
+      }
+      if (features.size() < 5 || offset + 5 >= (cities["numberMatched"] | 100u)) break;
     }
     if (id.length()) return id;
   }
