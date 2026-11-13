@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <driver/i2c.h>
 #include <esp_display_panel.hpp>
 #include <lvgl.h>
 #include <esp_heap_caps.h>
@@ -61,6 +62,27 @@ static void updateScreenPower() {
     lv_timer_ready(refreshTimer);
   }
 }
+static void updateBattery() {
+  static uint32_t lastRead = 0;
+  static bool sampled = false;
+  const uint32_t now = millis();
+  if (sampled && now - lastRead < 5000) return;
+  sampled = true;
+  lastRead = now;
+
+  // The display board already owns I2C0. Reuse its driver and leave the gauge read-only.
+  constexpr uint8_t gaugeAddress = 0x36;
+  constexpr uint8_t socRegister = 0x04;
+  uint8_t soc[2]{};
+  if (i2c_master_write_read_device(I2C_NUM_0, gaugeAddress, &socRegister, 1,
+                                   soc, sizeof(soc), pdMS_TO_TICKS(20)) != ESP_OK) {
+    uiSetBatteryPercent(-1);
+    return;
+  }
+  const unsigned raw = (static_cast<unsigned>(soc[0]) << 8) | soc[1];
+  uiSetBatteryPercent(raw == 0xffff ? -1 : static_cast<int>(std::min(100u, (raw + 128) / 256)));
+}
+
 void setup() {
   Serial.setRxBufferSize(1024);
   Serial.begin(115200);
@@ -81,7 +103,10 @@ void setup() {
   Serial.printf("Weather Display 0.1.0 | Flash %u MB | PSRAM %u MB\n",ESP.getFlashChipSize()/1048576,ESP.getPsramSize()/1048576);
 }
 void loop() {
-  if (!backlightOff) uiTick();
+  if (!backlightOff) {
+    updateBattery();
+    uiTick();
+  }
   lv_timer_handler();
   updateScreenPower();
   uiCalendarUsbExpire();
