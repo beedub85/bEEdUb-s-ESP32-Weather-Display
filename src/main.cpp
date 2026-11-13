@@ -3,7 +3,6 @@
 #include <lvgl.h>
 #include <esp_heap_caps.h>
 #include "app.hpp"
-#include "screen_idle.hpp"
 using namespace esp_panel::board;
 using namespace esp_panel::drivers;
 static Board *board;
@@ -34,7 +33,7 @@ static void touch(lv_indev_drv_t *,lv_indev_data_t *data) {
 
 static void updateScreenPower() {
   const uint32_t now = millis();
-  screenIdle.update(now);
+  screenIdle.update(now, settings.screenTimeoutSeconds);
   const bool turnOff = screenIdle.isSleeping();
   if (turnOff == backlightOff) return;
 

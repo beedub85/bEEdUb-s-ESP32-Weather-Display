@@ -5,6 +5,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 #include "core.hpp"
+#include "screen_idle.hpp"
 
 constexpr uint32_t weatherPollIntervalMs = 5 * 60 * 1000;
 constexpr uint32_t weatherStaleAfterMs = weatherPollIntervalMs + 30 * 1000;
@@ -13,6 +14,7 @@ struct Settings {
   String timezone=core::winnipegTimeZone;
   bool imperial=false;
   int brightness=100;
+  uint32_t screenTimeoutSeconds = ScreenIdle::defaultTimeoutSeconds;
 };
 struct Weather {
   bool loaded=false;

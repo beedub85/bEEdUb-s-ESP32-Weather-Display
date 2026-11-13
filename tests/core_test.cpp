@@ -8,20 +8,30 @@ static time_t at(int year,int month,int day,int hour=0,int min=0){tm t={};t.tm_y
 static Event timed(time_t start,time_t end){Event e;e.start=start;e.end=end;return e;}
 int main(){
  ScreenIdle screen;
+ static_assert(ScreenIdle::defaultTimeoutSeconds == 60);
+ static_assert(ScreenIdle::normalizeTimeout(120) == 120);
+ static_assert(ScreenIdle::normalizeTimeout(0) == 60);
+ constexpr uint32_t seconds = ScreenIdle::defaultTimeoutSeconds;
+ constexpr uint32_t timeoutMs = seconds * 1000;
  const uint32_t start = UINT32_MAX - 1000;
  screen.begin(start);
- screen.update(start + ScreenIdle::timeoutMs - 1);
+ screen.update(start + timeoutMs - 1, seconds);
  assert(!screen.isSleeping());
- screen.update(start + ScreenIdle::timeoutMs);
+ screen.update(start + timeoutMs, seconds);
  assert(screen.isSleeping());
- const uint32_t wake = start + ScreenIdle::timeoutMs + 1;
+ const uint32_t wake = start + timeoutMs + 1;
  assert(!screen.acceptsTouch(true, wake));
  assert(!screen.isSleeping());
  assert(!screen.acceptsTouch(true, wake + 20));
  assert(!screen.acceptsTouch(false, wake + 30));
  assert(screen.acceptsTouch(true, wake + 40));
- screen.update(wake + 40 + ScreenIdle::timeoutMs);
+ screen.update(wake + 40 + timeoutMs, seconds);
  assert(!screen.isSleeping()); // A held touch keeps the screen on.
+ screen.acceptsTouch(false, wake + 40);
+ screen.update(wake + 40 + 29'999, 30);
+ assert(!screen.isSleeping());
+ screen.update(wake + 40 + 30'000, 30);
+ assert(screen.isSleeping());
  assert(std::string_view(normalizeTimeZone("CST6CDT,M3.2.0,M11.1.0")) == "MBT5");
  assert(std::string_view(normalizeTimeZone("CST6")) == "CST6");
  setenv("TZ", winnipegTimeZone, 1);

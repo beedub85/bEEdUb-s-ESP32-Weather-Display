@@ -19,7 +19,9 @@ void loadSettings(){
   settings.calendarUrl=p.getString("calurl","");settings.calendarToken=p.getString("caltoken","");
   const String savedTimezone = p.getString("tz", core::winnipegTimeZone);
   settings.timezone = core::normalizeTimeZone(savedTimezone.c_str());
-  settings.imperial=p.getBool("imperial",false);settings.brightness=p.getInt("dim",100);p.end();
+  settings.imperial=p.getBool("imperial",false);settings.brightness=p.getInt("dim",100);
+  settings.screenTimeoutSeconds = ScreenIdle::normalizeTimeout(p.getUInt("screenTimeout", ScreenIdle::defaultTimeoutSeconds));
+  p.end();
   setenv("TZ",settings.timezone.c_str(),1);tzset();
 }
 void saveSettings(){
@@ -27,7 +29,9 @@ void saveSettings(){
   Preferences p;p.begin("wx-display",false);
   p.putString("ssid",c.ssid);p.putString("password",c.password);p.putString("station",c.station);
   p.putString("calurl",c.calendarUrl);p.putString("caltoken",c.calendarToken);p.putString("tz",c.timezone);
-  p.putBool("imperial",c.imperial);p.putInt("dim",c.brightness);p.end();
+  p.putBool("imperial",c.imperial);p.putInt("dim",c.brightness);
+  p.putUInt("screenTimeout", c.screenTimeoutSeconds);
+  p.end();
 }
 class ExternalJsonAllocator:public ArduinoJson::Allocator {
 public:

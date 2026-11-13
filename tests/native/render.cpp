@@ -70,8 +70,16 @@ int main(int argc,char**argv){
  assert(lv_obj_get_scroll_y(lv_obj_get_parent(lv_obj_get_parent(hour)))==14*54);
  swipe(false);swipe(false);capture("settings.ppm");
  // A swipe along the dimming row must not navigate away from Settings.
- uiTouch(true,350,280);uiTouch(true,650,280);uiTouch(false,0,0);frames();assert(std::string(lv_label_get_text(lv_obj_get_child(lv_scr_act(),0)))=="Settings");
+ uiTouch(true,350,250);uiTouch(true,650,250);uiTouch(false,0,0);frames();assert(std::string(lv_label_get_text(lv_obj_get_child(lv_scr_act(),0)))=="Settings");
  assert(!findButton(lv_scr_act(),"Calendar") && !findButton(lv_scr_act(),"Weather") && !findButton(lv_scr_act(),"Settings"));
+ auto *timeout = findLabel(lv_scr_act(), "Screen timeout");
+ assert(timeout && findLabel(lv_scr_act(), "1 minute  >"));
+ lv_event_send(lv_obj_get_parent(timeout), LV_EVENT_CLICKED, nullptr);
+ auto *twoMinutes = findButton(lv_layer_top(), "2 minutes");
+ assert(twoMinutes);
+ lv_event_send(twoMinutes, LV_EVENT_CLICKED, nullptr);
+ frames();
+ assert(settings.screenTimeoutSeconds == 120 && findLabel(lv_scr_act(), "2 minutes  >"));
  auto*wifi=findLabel(lv_scr_act(),"Wi-Fi");assert(wifi);lv_event_send(lv_obj_get_parent(wifi),LV_EVENT_CLICKED,nullptr);frames();capture("wifi-editor.ppm");
  swipe(true);assert(findButton(lv_layer_top(),"Close"));
  lv_event_send(findButton(lv_layer_top(),"Close"),LV_EVENT_CLICKED,nullptr);frames();

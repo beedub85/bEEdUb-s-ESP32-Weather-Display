@@ -59,4 +59,4 @@ Pinned dependencies: pioarduino Espressif32 53.03.11 / Arduino ESP32 3.1.1 (ESP-
 
 Hardware references: https://docs.waveshare.com/ESP32-S3-Touch-LCD-7 and https://github.com/esp-arduino-libs/ESP32_Display_Panel . Station source: https://github.com/beedub85/weatherstation/tree/esp32-support .
 
-The backlight switches off after 30 seconds without touch input. Touch anywhere to wake it. Weather and calendar sync continue while the screen is dark.
+The backlight switches off after 60 seconds without touch input by default. In **Settings → Screen timeout**, choose 15 seconds, 30 seconds, 1 minute, 2 minutes, or 5 minutes. The display remembers your choice after restart. Touch anywhere to wake it. Weather and calendar sync continue while the screen is dark.

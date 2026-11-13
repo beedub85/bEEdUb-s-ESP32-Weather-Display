@@ -308,15 +308,43 @@ static void brightnessChanged(lv_event_t*e){int value=lv_slider_get_value(lv_eve
   xSemaphoreTake(stateMutex,portMAX_DELAY);settings.brightness=value;xSemaphoreGive(stateMutex);uiSetDimming(value);
   if(lv_event_get_code(e)==LV_EVENT_RELEASED)saveSettings();
 }
+static String screenTimeoutLabel(uint32_t seconds) {
+  return seconds < 60 ? String(seconds) + " seconds" :
+         String(seconds / 60) + (seconds == 60 ? " minute" : " minutes");
+}
+
+static void selectScreenTimeout(lv_event_t *event) {
+  const auto seconds = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(lv_event_get_user_data(event)));
+  xSemaphoreTake(stateMutex, portMAX_DELAY);
+  settings.screenTimeoutSeconds = seconds;
+  xSemaphoreGive(stateMutex);
+  saveSettings();
+  closeModal();
+  redraw = true;
+}
+
+static void openScreenTimeout(lv_event_t *) {
+  if (navigation) return;
+  auto *screen = newModal("Screen timeout");
+  label(screen, "Turn off the backlight after this long without a touch.", 24, 74, 752);
+  int y = 110;
+  for (uint32_t seconds : ScreenIdle::timeoutOptions) {
+    button(screen, screenTimeoutLabel(seconds), 24, y, 752, 48, selectScreenTimeout,
+           reinterpret_cast<void *>(static_cast<uintptr_t>(seconds)),
+           seconds == settings.screenTimeoutSeconds ? 0x147C78 : CARD);
+    y += 58;
+  }
+}
+
 static void settingsScreen(){
-  const char*names[]={"Wi-Fi","Weather station","Google Calendar","Display dimming","Imperial units","Time zone"};
-  String values[]={settings.ssid.isEmpty()?"Tap to connect":settings.ssid,settings.station,settings.calendarUrl.isEmpty()?"Tap to link":"Configured", "", "°F / mph / in", timezoneName()};
-  int kinds[]={0,1,2,-1,-1,3};
-  for(int i=0;i<6;++i){auto*b=box(root,20,78+i*60,760,50,CARD);
+  const char*names[]={"Wi-Fi","Weather station","Google Calendar","Display dimming","Imperial units","Time zone","Screen timeout"};
+  String values[]={settings.ssid.isEmpty()?"Tap to connect":settings.ssid,settings.station,settings.calendarUrl.isEmpty()?"Tap to link":"Configured", "", "°F / mph / in", timezoneName(), screenTimeoutLabel(settings.screenTimeoutSeconds)};
+  int kinds[]={0,1,2,-1,-1,3,-1};
+  for(int i=0;i<7;++i){auto*b=box(root,20,70+i*53,760,48,CARD);
     label(b,names[i],16,14,220,&lv_font_montserrat_18);
     if(i==3){auto*s=lv_slider_create(b);lv_obj_set_pos(s,300,20);lv_obj_set_size(s,416,10);lv_slider_set_range(s,20,100);lv_slider_set_value(s,settings.brightness,LV_ANIM_OFF);lv_obj_add_event_cb(s,brightnessChanged,LV_EVENT_VALUE_CHANGED,nullptr);lv_obj_add_event_cb(s,brightnessChanged,LV_EVENT_RELEASED,nullptr);}
     else if(i==4){label(b,values[i],300,15,320,&lv_font_montserrat_14,MUTED);auto*s=lv_switch_create(b);lv_obj_set_pos(s,680,10);lv_obj_set_size(s,60,30);if(settings.imperial)lv_obj_add_state(s,LV_STATE_CHECKED);lv_obj_add_event_cb(s,unitsChanged,LV_EVENT_VALUE_CHANGED,nullptr);}
-    else{auto*l=label(b,values[i]+"  >",250,16,490,&lv_font_montserrat_14,TEAL);lv_label_set_long_mode(l,LV_LABEL_LONG_DOT);lv_obj_add_flag(b,LV_OBJ_FLAG_CLICKABLE);lv_obj_add_event_cb(b,edit,LV_EVENT_CLICKED,(void*)(intptr_t)kinds[i]);}
+    else{auto*l=label(b,values[i]+"  >",250,16,490,&lv_font_montserrat_14,TEAL);lv_label_set_long_mode(l,LV_LABEL_LONG_DOT);lv_obj_add_flag(b,LV_OBJ_FLAG_CLICKABLE);lv_obj_add_event_cb(b,i==6?openScreenTimeout:edit,LV_EVENT_CLICKED,(void*)(intptr_t)kinds[i]);}
   }
   label(root,"Swipe right to return to Weather • Dimming changes image intensity",24,450,750,&lv_font_montserrat_12,MUTED);
 }
@@ -446,7 +474,7 @@ void uiTouch(bool pressed,int x,int y){
   static int sx=0,sy=0,ex=0,ey=0;static uint32_t at=0;
   if(pressed){if(!touchDown){sx=x;sy=y;at=millis();touchDown=true;}ex=x;ey=y;}
   else if(touchDown){touchDown=false;int dx=ex-sx,dy=ey-sy;
-    bool editing=modal || (page==2 && sy>=258 && sy<=310);
+    bool editing=modal || (page==2 && sy>=229 && sy<277);
     if(!editing && millis()-at<1200 && abs(dx)>=100 && abs(dx)>abs(dy)*1.6f){int next=page+(dx>0?-1:1);if(next>=0 && next<=2)navigation=dx>0?-1:1;}
   }
 }
