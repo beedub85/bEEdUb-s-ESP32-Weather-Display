@@ -22,6 +22,10 @@ Weather data source: [Environment and Climate Change Canada, City Page Weather](
 
 Tap **Print Room** on the Weather dashboard for read-only printer progress, status, temperatures, and optional room sensors. Set up the local Home Assistant bridge and enter its address under **Settings → Print Room**. [Print Room setup](docs/PRINT_ROOM_SETUP.md)
 
+### Screen orientation
+
+Turn on **Settings → Rotate screen 180°** to mount the display upside down. The picture and touch rotate immediately, and the choice is saved across restarts.
+
 ### Battery indicator
 
 The top corner shows a percentage when an optional MAX17048 single-cell fuel gauge is available on the board's I²C bus (address `0x36`). The Waveshare battery connector supplies power, but the stock board does not provide a firmware-readable charge percentage. Without a responding gauge, the indicator shows `--%`. The percentage is the gauge's estimated state of charge. Use a compatible gauge breakout with a protected single-cell battery and follow the breakout manufacturer's connection and polarity instructions.

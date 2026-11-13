@@ -722,14 +722,34 @@ static void openScreenTimeout(lv_event_t *) {
   }
 }
 
+static void rotationChanged(lv_event_t *event) {
+  const bool enabled = lv_obj_has_state(lv_event_get_target(event), LV_STATE_CHECKED);
+  xSemaphoreTake(stateMutex, portMAX_DELAY);
+  settings.rotateScreen = enabled;
+  xSemaphoreGive(stateMutex);
+  saveSettings();
+  lv_obj_invalidate(lv_scr_act());
+}
+
+static constexpr int settingsTop = 61;
+static constexpr int settingsRowPitch = 41;
+static constexpr int settingsRowHeight = 38;
+static constexpr int dimmingTop = settingsTop + 3 * settingsRowPitch;
+
 static void settingsScreen(){
-  const char*names[]={"Wi-Fi","Weather station","Google Calendar","Display dimming","Imperial units","Time zone","Screen timeout","Postal code","Print Room"};
-  String values[]={settings.ssid.isEmpty()?"Tap to connect":settings.ssid,settings.station,settings.calendarUrl.isEmpty()?"Tap to link":"Configured", "", "°F / mph / in", timezoneName(), screenTimeoutLabel(settings.screenTimeoutSeconds), settings.postalCode.isEmpty() ? "Tap to set location" : settings.postalCode, settings.printRoomUrl.isEmpty() ? "Tap to set bridge" : settings.printRoomUrl};
-  int kinds[]={0,1,2,-1,-1,3,-1,4,5};
-  for(int i=0;i<9;++i){auto*b=box(root,20,61+i*45,760,41,CARD);
+  const char*names[]={"Wi-Fi","Weather station","Google Calendar","Display dimming","Imperial units","Time zone","Screen timeout","Postal code","Print Room","Rotate screen 180°"};
+  String values[]={settings.ssid.isEmpty()?"Tap to connect":settings.ssid,settings.station,settings.calendarUrl.isEmpty()?"Tap to link":"Configured", "", "°F / mph / in", timezoneName(), screenTimeoutLabel(settings.screenTimeoutSeconds), settings.postalCode.isEmpty() ? "Tap to set location" : settings.postalCode, settings.printRoomUrl.isEmpty() ? "Tap to set bridge" : settings.printRoomUrl, ""};
+  int kinds[]={0,1,2,-1,-1,3,-1,4,5,-1};
+  for(int i=0;i<10;++i){auto*b=box(root,20,settingsTop+i*settingsRowPitch,760,settingsRowHeight,CARD);
     label(b,names[i],16,11,220,&lv_font_montserrat_18);
     if(i==3){auto*s=lv_slider_create(b);lv_obj_set_pos(s,300,20);lv_obj_set_size(s,416,10);lv_slider_set_range(s,20,100);lv_slider_set_value(s,settings.brightness,LV_ANIM_OFF);lv_obj_add_event_cb(s,brightnessChanged,LV_EVENT_VALUE_CHANGED,nullptr);lv_obj_add_event_cb(s,brightnessChanged,LV_EVENT_RELEASED,nullptr);}
-    else if(i==4){label(b,values[i],300,15,320,&lv_font_montserrat_14,MUTED);auto*s=lv_switch_create(b);lv_obj_set_pos(s,680,7);lv_obj_set_size(s,60,30);if(settings.imperial)lv_obj_add_state(s,LV_STATE_CHECKED);lv_obj_add_event_cb(s,unitsChanged,LV_EVENT_VALUE_CHANGED,nullptr);}
+    else if(i==4 || i==9){
+      if(i==4) label(b,values[i],300,11,320,&lv_font_montserrat_14,MUTED);
+      auto *toggle = lv_switch_create(b);
+      lv_obj_set_pos(toggle,680,4);lv_obj_set_size(toggle,60,30);
+      if(i==4 ? settings.imperial : settings.rotateScreen) lv_obj_add_state(toggle,LV_STATE_CHECKED);
+      lv_obj_add_event_cb(toggle,i==4?unitsChanged:rotationChanged,LV_EVENT_VALUE_CHANGED,nullptr);
+    }
     else{auto*l=label(b,values[i]+"  >",250,16,490,&lv_font_montserrat_14,TEAL);lv_label_set_long_mode(l,LV_LABEL_LONG_DOT);lv_obj_add_flag(b,LV_OBJ_FLAG_CLICKABLE);lv_obj_add_event_cb(b,i==6?openScreenTimeout:edit,LV_EVENT_CLICKED,(void*)(intptr_t)kinds[i]);}
   }
 }
@@ -860,7 +880,7 @@ void uiTouch(bool pressed,int x,int y){
   static int sx=0,sy=0,ex=0,ey=0;static uint32_t at=0;
   if(pressed){if(!touchDown){sx=x;sy=y;at=millis();touchDown=true;}ex=x;ey=y;}
   else if(touchDown){touchDown=false;int dx=ex-sx,dy=ey-sy;
-    bool editing=modal || (page==2 && sy>=196 && sy<237);
+    bool editing=modal || (page==2 && sy>=dimmingTop && sy<dimmingTop+settingsRowHeight);
     if(!editing && millis()-at<1200 && abs(dx)>=100 && abs(dx)>abs(dy)*1.6f){int next=page+(dx>0?-1:1);if(next>=0 && next<=2)navigation=dx>0?-1:1;}
   }
 }

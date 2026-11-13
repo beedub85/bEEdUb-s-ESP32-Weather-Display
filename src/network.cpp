@@ -29,6 +29,7 @@ void loadSettings(){
   settings.postalCode = p.getString("postal", "");
   settings.printRoomUrl = p.getString("printRoom", "");
   settings.printRoomKey = p.getString("printRoomKey", "");
+  settings.rotateScreen = p.getBool("rotateScreen", false);
   p.end();
   setenv("TZ",settings.timezone.c_str(),1);tzset();
 }
@@ -39,6 +40,7 @@ void saveSettings(){
   p.putString("calurl",c.calendarUrl);p.putString("caltoken",c.calendarToken);p.putString("tz",c.timezone);
   p.putBool("imperial",c.imperial);p.putInt("dim",c.brightness);
   p.putUInt("screenTimeout", c.screenTimeoutSeconds);
+  p.putBool("rotateScreen", c.rotateScreen);
   p.putString("postal", c.postalCode);
   p.putString("printRoom", c.printRoomUrl);
   p.putString("printRoomKey", c.printRoomKey);
