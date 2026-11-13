@@ -49,7 +49,7 @@ The public feed is checked about every five minutes and needs Wi-Fi, internet ac
 
 ### Screen rotation
 
-Use **Settings → Rotate screen 180°** to flip the display and touch together. The orientation resets on reboot, so pressing RESET restores the normal orientation if you encounter problems.
+Use **Settings → Rotate screen 180°** to flip the display and touch together. The display saves your orientation and restores it after a restart. Turn the toggle off to return to the normal orientation.
 
 ### Battery indicator
 

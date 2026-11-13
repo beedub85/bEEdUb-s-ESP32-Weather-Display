@@ -29,6 +29,7 @@ void loadSettings(){
   settings.postalCode = p.getString("postal", "");
   settings.printRoomUrl = p.getString("printRoom", "");
   settings.printRoomKey = p.getString("printRoomKey", "");
+  settings.rotateScreen = p.getBool("rotateScreen", false);
   p.end();
   setenv("TZ",settings.timezone.c_str(),1);tzset();
 }
@@ -42,6 +43,7 @@ void saveSettings(){
   p.putString("postal", c.postalCode);
   p.putString("printRoom", c.printRoomUrl);
   p.putString("printRoomKey", c.printRoomKey);
+  p.putBool("rotateScreen", c.rotateScreen);
   p.end();
 }
 class ExternalJsonAllocator:public ArduinoJson::Allocator {
@@ -120,7 +122,8 @@ static bool publicJson(const String &url, JsonDocument &result, size_t cap, Json
     return false;
   }
   const auto status = deserializeJson(result, body.data.data(), body.data.size(),
-                                      DeserializationOption::Filter(*filter));
+                                      DeserializationOption::Filter(*filter),
+                                      DeserializationOption::NestingLimit(32));
   if (status) error = String("invalid response: ") + status.c_str();
   return !status;
 }

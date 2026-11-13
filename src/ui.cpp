@@ -728,6 +728,7 @@ static void rotationChanged(lv_event_t *event) {
   xSemaphoreTake(stateMutex, portMAX_DELAY);
   settings.rotateScreen = enabled;
   xSemaphoreGive(stateMutex);
+  saveSettings();
 
   lv_obj_invalidate(lv_scr_act());
 }
