@@ -8,6 +8,13 @@ using namespace core;
 static time_t at(int year,int month,int day,int hour=0,int min=0){tm t={};t.tm_year=year-1900;t.tm_mon=month-1;t.tm_mday=day;t.tm_hour=hour;t.tm_min=min;t.tm_isdst=-1;return mktime(&t);}
 static Event timed(time_t start,time_t end){Event e;e.start=start;e.end=end;return e;}
 int main(){
+ setenv("TZ", "EST5EDT,M3.2.0,M11.1.0", 1);
+ tzset();
+ assert(localWeather::utcTimestamp("2024-02-29T00:00:00Z") == 1709164800);
+ assert(localWeather::utcTimestamp("20240229000000") == 1709164800);
+ assert(localWeather::utcTimestamp("2023-02-29T00:00:00Z") == 0);
+ assert(localWeather::utcTimestamp("2024-02-29T00:00:00X") == 0);
+ assert(localWeather::utcTimestamp("1970-01-02T00:00:01Z") == 86401);
  char prefix[4];
  assert(localWeather::postalPrefix("r0j 1e0", prefix) && std::string_view(prefix) == "R0J");
  assert(localWeather::postalPrefix("B3H", prefix) && std::string_view(prefix) == "B3H");

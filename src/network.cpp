@@ -165,16 +165,6 @@ static String cityForPostalCode(const String &postal) {
   return "";
 }
 
-static time_t utcTimestamp(const char *s) {
-  const size_t length = strlen(s);
-  const char *format = length == 20 && s[19] == 'Z' ? "%Y-%m-%dT%H:%M:%SZ" :
-      length == 14 && strspn(s, "0123456789") == 14 ? "%Y%m%d%H%M%S" : nullptr;
-  if (!format) return 0;
-  tm date{};
-  const char *end = strptime(s, format, &date);
-  return end && !*end ? timegm(&date) : 0;
-}
-
 static String english(JsonVariantConst value) {
   if (value.is<const char *>()) return value.as<const char *>();
   return value["en"] | "";
@@ -199,7 +189,7 @@ static bool fetchLocalForecast(const String &id, LocalForecast &result) {
   result.region = english(city["region"]);
   if (result.location.isEmpty()) return false;
   for (JsonObject row : city["hourlyForecastGroup"]["hourlyForecasts"].as<JsonArray>()) {
-    const time_t at = utcTimestamp(row["timestamp"] | "");
+    const time_t at = localWeather::utcTimestamp(row["timestamp"] | "");
     if (!at || result.hours.size() >= 48) continue;
     result.hours.push_back({at, number(row["temperature"]["value"]["en"]),
                             row["lop"]["value"]["en"] | -1, english(row["condition"])});
@@ -215,11 +205,11 @@ static bool fetchLocalForecast(const String &id, LocalForecast &result) {
     String expires = english(row["expiryTime"]);
     if (expires.isEmpty()) expires = english(row["expiry"]);
     if (title.length() && result.alerts.size() < 24)
-      result.alerts.push_back({title, utcTimestamp(expires.c_str())});
+      result.alerts.push_back({title, localWeather::utcTimestamp(expires.c_str())});
     else if (title.isEmpty()) result.alertsKnown = false;
   }
   result.checked = time(nullptr);
-  const auto published = utcTimestamp(city["lastUpdated"] | "");
+  const auto published = localWeather::utcTimestamp(city["lastUpdated"] | "");
   if (published && result.checked - published > 2 * 60 * 60)
     result.error = "Environment Canada data is out of date";
   return true;
