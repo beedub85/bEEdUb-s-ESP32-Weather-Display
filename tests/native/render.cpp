@@ -4,8 +4,8 @@
 #include <fstream>
 #include <iostream>
 uint32_t testMillis=10000;
-Settings settings;State shared;SemaphoreHandle_t stateMutex=nullptr;
-volatile int requestedWeek=0;std::atomic<bool> calendarRefreshRequested{false};FakeWiFi WiFi;
+Settings settings;State shared;LocalForecast localForecast;localWeather::History weatherHistory;SemaphoreHandle_t stateMutex=nullptr;
+volatile int requestedWeek=0;std::atomic<bool> calendarRefreshRequested{false}, todayOverviewOpen{false};FakeWiFi WiFi;
 void saveSettings(){}void loadSettings(){}void startNetwork(){}
 static lv_color_t fb[800*480],buf[800*32];
 static void flush(lv_disp_drv_t*d,const lv_area_t*a,lv_color_t*p){for(int y=a->y1;y<=a->y2;++y)for(int x=a->x1;x<=a->x2;++x)fb[y*800+x]=*p++;lv_disp_flush_ready(d);}
@@ -70,7 +70,7 @@ int main(int argc,char**argv){
  assert(lv_obj_get_scroll_y(lv_obj_get_parent(lv_obj_get_parent(hour)))==14*54);
  swipe(false);swipe(false);capture("settings.ppm");
  // A swipe along the dimming row must not navigate away from Settings.
- uiTouch(true,350,250);uiTouch(true,650,250);uiTouch(false,0,0);frames();assert(std::string(lv_label_get_text(lv_obj_get_child(lv_scr_act(),0)))=="Settings");
+ uiTouch(true,350,225);uiTouch(true,650,225);uiTouch(false,0,0);frames();assert(std::string(lv_label_get_text(lv_obj_get_child(lv_scr_act(),0)))=="Settings");
  assert(!findButton(lv_scr_act(),"Calendar") && !findButton(lv_scr_act(),"Weather") && !findButton(lv_scr_act(),"Settings"));
  auto *timeout = findLabel(lv_scr_act(), "Screen timeout");
  assert(timeout && findLabel(lv_scr_act(), "1 minute  >"));
@@ -120,6 +120,50 @@ int main(int argc,char**argv){
  lv_event_send(findButton(lv_layer_top(), "Close"), LV_EVENT_CLICKED, nullptr);
  assert(sendCalendarLine(command) == CalendarUsbResult::Pending);
  std::cout<<"PASS: calendar USB setup accepts valid credentials only while enabled\n";
+ swipe(true);
+ auto openPanel = [](const char *name) {
+   auto *panel = findButton(lv_scr_act(), name);
+   assert(panel);
+   lv_event_send(panel, LV_EVENT_CLICKED, nullptr);
+   frames();
+ };
+ auto closePanel = [] {
+   lv_event_send(findButton(lv_layer_top(), "Close"), LV_EVENT_CLICKED, nullptr);
+   frames();
+ };
+ settings.postalCode = "R0J";
+ localForecast.postalCode = settings.postalCode;
+ localForecast.location = "Minnedosa";
+ localForecast.region = "Rural Manitoba";
+ localForecast.checked = time(nullptr);
+ const time_t nextHour = localForecast.checked - localForecast.checked % 3600 + 3600;
+ for (int i = 0; i < 4; ++i)
+   localForecast.hours.push_back({nextHour + i * 3600, float(-4 - i), 20 + i * 10, "Partly cloudy"});
+ localForecast.alerts.push_back({"Sample snowfall warning", localForecast.checked + 14400});
+ shared.todayWeek = core::sunday(localForecast.checked, 0);
+ auto appointment = core::Event{};
+ appointment.title = "Check enclosure fit";
+ appointment.start = localForecast.checked + 60;
+ appointment.end = appointment.start + 900;
+ shared.todayEvents.push_back(appointment);
+ for (int i = 0; i < 140; ++i)
+   weatherHistory.add({localForecast.checked - (139 - i) * 300,
+                       {4.0f + std::sin(i / 30.0f) * 5, 1014, 15, 3}});
+ testMillis += 1000;
+ frames();
+ openPanel("Today at a Glance");capture("today-at-a-glance.ppm");closePanel();
+ openPanel("Weather Trends");capture("weather-trends.ppm");closePanel();
+ openPanel("Active Weather Alerts");capture("weather-alerts.ppm");closePanel();
+ swipe(false);
+ auto *postal = findLabel(lv_scr_act(), "Postal code");
+ assert(postal);
+ lv_event_send(lv_obj_get_parent(postal), LV_EVENT_CLICKED, nullptr);
+ capture("postal-code.ppm");
+ auto *editor = findButton(lv_layer_top(), "Save");
+ assert(editor);
+ lv_event_send(editor, LV_EVENT_CLICKED, nullptr);
+ frames();
+ assert(settings.postalCode == "R0J");
  // No three-page navigation buttons exist in the UI; screen title is a label only.
  std::cout<<"PASS: rendered weather, today, week, settings; swipe navigation, slider guard, scroll preservation, modal guard, time-zone selection, condition icon changes and stale fallback\n";
 }

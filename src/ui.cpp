@@ -16,6 +16,18 @@ static String lastCalendarError;
 static lv_obj_t *fields[3],*keyboard,*form,*contentScroller=nullptr;
 static bool renderedWeek=false;
 static Settings draft;
+enum class WeatherPanel { None, Today, Trends, Alerts };
+static WeatherPanel weatherPanel = WeatherPanel::None;
+static localWeather::Metric trendMetric = localWeather::Temperature;
+static lv_obj_t *todayStation, *todayEvents, *todayForecast, *alertsBody, *alertsButton;
+static lv_obj_t *trendChart, *trendScale, *trendReading;
+static lv_point_t trendSegments[localWeather::sampleCount - 1][2];
+static time_t lastTrendSample;
+static time_t lastAlertsCheck;
+static bool lastAlertsFresh;
+static unsigned lastActiveAlerts;
+static String lastAlertsError;
+static bool alertBanner = false;
 static lv_obj_t *calendarUsbStatus = nullptr;
 static uint32_t calendarUsbStarted;
 static char calendarUsbLine[540];
@@ -57,7 +69,7 @@ static String dateText(time_t t,const char*pattern){char b[80];tm d=*localtime(&
 static String temp(float n){return fmt(core::temp(n,settings.imperial))+ (settings.imperial?"°F":"°C");}
 static String speed(float n){return fmt(core::wind(n,settings.imperial),0)+(settings.imperial?" mph":" km/h");}
 static String rain(float n){return fmt(core::rain(n,settings.imperial),settings.imperial?2:1)+(settings.imperial?" in":" mm");}
-static void closeModal(){if(calendarUsbStatus){calendarUsbStatus=nullptr;clearCalendarUsbLine();}if(modal){lv_obj_del(modal);modal=nullptr;lv_obj_invalidate(lv_scr_act());}keyboard=nullptr;}
+static void closeModal(){if(weatherPanel==WeatherPanel::Today)todayOverviewOpen.store(false);weatherPanel=WeatherPanel::None;if(calendarUsbStatus){calendarUsbStatus=nullptr;clearCalendarUsbLine();}if(modal){lv_obj_del(modal);modal=nullptr;lv_obj_invalidate(lv_scr_act());}keyboard=nullptr;}
 static void dismiss(lv_event_t*){closeModal();}
 static lv_obj_t* newModal(const String &title){
   closeModal();modal=box(lv_layer_top(),0,0,800,480,0x07131F,0);
@@ -77,6 +89,8 @@ static void eventDetails(lv_event_t *ev){
 static const char *weatherCardTitles[] = {
   "TEMPERATURE", "HUMIDITY", "WIND", "PRESSURE", "RAINFALL", "LIGHT", "AIR QUALITY"
 };
+
+static void openTrends(lv_event_t *event);
 
 static void weatherDetails(lv_event_t *event) {
   if (navigation) return;
@@ -130,6 +144,12 @@ static void weatherDetails(lv_event_t *event) {
   auto *details = newModal(weatherCardTitles[card]);
   auto *body = box(details, 20, 72, 760, 390, CARD);
   label(body, readings, 20, 16, 715, &lv_font_montserrat_18);
+  if (card == 0 || card == 2 || card == 3 || card == 4) {
+    const auto metric = card == 0 ? localWeather::Temperature : card == 2 ? localWeather::Gust :
+                        card == 3 ? localWeather::Pressure : localWeather::Rain;
+    button(body, "24-hour trend", 20, 310, 175, 48, openTrends,
+           reinterpret_cast<void *>(static_cast<uintptr_t>(metric)));
+  }
 }
 static void weatherUpdate(){
   const Weather&w=snapshot.weather;
@@ -171,6 +191,235 @@ static void weatherUpdate(){
   if(w.loaded && millis()-w.received>weatherStaleAfterMs)status="STALE DATA • "+status;
   updateLabel(statusLabel,status.c_str());
 }
+static bool forecastFresh(const LocalForecast &forecast, time_t now) {
+  return forecast.error.isEmpty() && forecast.checked && now >= forecast.checked &&
+         now - forecast.checked <= 11 * 60;
+}
+
+static bool activeAlert(const WeatherAlert &alert, time_t now) {
+  return !alert.expires || alert.expires > now;
+}
+
+static String forecastStatus(const LocalForecast &forecast) {
+  if (settings.postalCode.isEmpty()) return "Set your postal code in Settings.";
+  if (!forecast.error.isEmpty()) return forecast.error;
+  if (!forecast.checked) return "Waiting for the Environment Canada feed...";
+  return "Environment Canada feed is out of date.";
+}
+
+static void updateToday(const LocalForecast &forecast, const String &agenda, time_t now) {
+  const auto &w = snapshot.weather;
+  bool fresh = w.loaded && millis() - w.received <= weatherStaleAfterMs && snapshot.weatherError.isEmpty();
+  String station = w.loaded ? temp(w.temp) + "  |  Low " + temp(w.min) + "  |  High " + temp(w.max) :
+                              String("Waiting for station readings");
+  if (w.loaded && !fresh) station += "  |  Stale";
+  updateLabel(todayStation, station.c_str());
+  updateLabel(todayEvents, agenda.c_str());
+  String hours;
+  if (forecastFresh(forecast, now)) {
+    hours = forecast.location;
+    unsigned shown = 0;
+    for (const auto &hour : forecast.hours) {
+      if (hour.at < now - now % 3600 || shown >= 4) continue;
+      hours += "\n" + dateText(hour.at, "%H:%M") + "   " + temp(hour.temperature) + "   " + hour.condition;
+      if (hour.precipitation >= 0) hours += "   " + String(hour.precipitation) + "% precip.";
+      ++shown;
+    }
+    if (!shown) hours += "\nHourly forecast unavailable";
+  } else hours = forecastStatus(forecast);
+  updateLabel(todayForecast, hours.c_str());
+}
+
+static void openToday(lv_event_t *) {
+  if (navigation) return;
+  auto *screen = newModal("Today at a Glance");
+  weatherPanel = WeatherPanel::Today;
+  todayOverviewOpen.store(true);
+  auto *station = box(screen, 20, 70, 760, 77, CARD);
+  label(station, "YOUR WEATHER STATION", 16, 10, 728, &lv_font_montserrat_14, TEAL);
+  todayStation = label(station, "", 16, 32, 728, &lv_font_montserrat_24);
+  auto *agenda = box(screen, 20, 157, 760, 105, CARD);
+  label(agenda, "NEXT ON YOUR CALENDAR", 16, 10, 728, &lv_font_montserrat_14, TEAL);
+  todayEvents = label(agenda, "", 16, 33, 728, &lv_font_montserrat_16);
+  lv_obj_set_height(todayEvents, 64);
+  lv_label_set_long_mode(todayEvents, LV_LABEL_LONG_DOT);
+  auto *hours = box(screen, 20, 272, 760, 185, CARD);
+  label(hours, "HOURLY FORECAST  /  ENVIRONMENT CANADA", 16, 10, 728, &lv_font_montserrat_14, TEAL);
+  todayForecast = label(hours, "", 16, 34, 728, &lv_font_montserrat_18);
+  lv_obj_set_height(todayForecast, 145);
+  lv_label_set_long_mode(todayForecast, LV_LABEL_LONG_DOT);
+  lastTick = millis() - 1000;
+}
+
+static void updateAlerts(const LocalForecast &forecast, time_t now) {
+  const bool fresh = forecastFresh(forecast, now);
+  const unsigned active = std::count_if(forecast.alerts.begin(), forecast.alerts.end(),
+      [now](const auto &alert) { return activeAlert(alert, now); });
+  if (lastAlertsCheck == forecast.checked && lastAlertsFresh == fresh &&
+      lastAlertsError == forecast.error && lastActiveAlerts == active) return;
+  lastActiveAlerts = active;
+  lastAlertsCheck = forecast.checked;
+  lastAlertsFresh = fresh;
+  lastAlertsError = forecast.error;
+  lv_obj_clean(alertsBody);
+  String where = forecast.location;
+  if (forecast.region.length() && forecast.region != forecast.location) where += "  /  " + forecast.region;
+  label(alertsBody, where, 16, 10, 720, &lv_font_montserrat_18, TEAL);
+  int y = 43;
+  if (!fresh) {
+    label(alertsBody, forecastStatus(forecast), 16, y, 710);
+    y += 35;
+  }
+  unsigned shown = 0;
+  for (const auto &alert : forecast.alerts) {
+    if (!activeAlert(alert, now)) continue;
+    auto *card = box(alertsBody, 12, y, 724, 85, 0x412C25);
+    auto *title = label(card, alert.title, 14, 10, 690, &lv_font_montserrat_18);
+    lv_label_set_long_mode(title, LV_LABEL_LONG_DOT);
+    label(card, alert.expires ? "Expires " + dateText(alert.expires, "%a %b %d, %H:%M") :
+          String("Expiry unavailable"), 14, 45, 690, &lv_font_montserrat_16, MUTED);
+    y += 94;
+    ++shown;
+  }
+  if (!shown && fresh) label(alertsBody, forecast.alertsKnown ? "No active alerts reported." :
+                            "Alert status unavailable.", 16, y, 710);
+}
+
+static void openAlerts(lv_event_t *) {
+  if (navigation) return;
+  auto *screen = newModal("Weather Alerts");
+  weatherPanel = WeatherPanel::Alerts;
+  alertsBody = box(screen, 20, 70, 760, 360, CARD);
+  lv_obj_add_flag(alertsBody, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_scroll_dir(alertsBody, LV_DIR_VER);
+  label(screen, "Source: Environment and Climate Change Canada", 24, 442, 752,
+        &lv_font_montserrat_14, MUTED);
+  lastAlertsCheck = -1;
+  lastTick = millis() - 1000;
+}
+
+static const char *trendNames[] = {"Temperature", "Pressure", "Wind gusts", "Rainfall"};
+static localWeather::History displayedHistory;
+
+static String trendValue(float value) {
+  switch (trendMetric) {
+    case localWeather::Temperature: return temp(value);
+    case localWeather::Pressure:
+      return fmt(core::pressure(value, settings.imperial), settings.imperial ? 2 : 1) +
+             (settings.imperial ? " inHg" : " hPa");
+    case localWeather::Gust: return speed(value);
+    default: return rain(value);
+  }
+}
+
+static void pickTrendPoint(lv_event_t *) {
+  auto *input = lv_indev_get_act();
+  if (!input || !displayedHistory.count) return;
+  lv_point_t point;
+  lv_indev_get_point(input, &point);
+  lv_area_t area;
+  lv_obj_get_coords(trendChart, &area);
+  const time_t end = displayedHistory.at(displayedHistory.count - 1).at;
+  const time_t start = end - localWeather::historySeconds;
+  const time_t target = start + static_cast<int64_t>(std::clamp<int>(point.x - area.x1, 0, 623)) *
+                                localWeather::historySeconds / 623;
+  const localWeather::Sample *nearest = nullptr;
+  time_t distance = 601;
+  for (unsigned i = 0; i < displayedHistory.count; ++i) {
+    const auto &sample = displayedHistory.at(i);
+    const auto delta = sample.at > target ? sample.at - target : target - sample.at;
+    if (sample.at >= start && delta < distance && std::isfinite(sample.values[trendMetric])) {
+      nearest = &sample;
+      distance = delta;
+    }
+  }
+  const String reading = nearest ? dateText(nearest->at, "%a %H:%M") + "  /  " +
+                        trendValue(nearest->values[trendMetric]) : String("No sample near this time");
+  updateLabel(trendReading, reading.c_str());
+}
+
+static void drawTrend() {
+  lv_obj_clean(trendChart);
+  if (!displayedHistory.count) {
+    updateLabel(trendScale, "");
+    updateLabel(trendReading, "History starts after a station reading and internet time sync.");
+    return;
+  }
+  const time_t end = displayedHistory.at(displayedHistory.count - 1).at;
+  const time_t start = end - localWeather::historySeconds;
+  float lo = INFINITY, hi = -INFINITY;
+  unsigned count = 0;
+  const localWeather::Sample *latest = nullptr;
+  for (unsigned i = 0; i < displayedHistory.count; ++i) {
+    const auto &sample = displayedHistory.at(i);
+    const float value = sample.values[trendMetric];
+    if (sample.at < start || !std::isfinite(value)) continue;
+    lo = std::min(lo, value);
+    hi = std::max(hi, value);
+    latest = &sample;
+    ++count;
+  }
+  if (!latest) {
+    updateLabel(trendScale, "");
+    updateLabel(trendReading, "No readings available for this sensor.");
+    return;
+  }
+  updateLabel(trendScale, (dateText(start, "%a %H:%M") + "  to  " + dateText(end, "%a %H:%M") +
+             "     |     Low " + trendValue(lo) + "   High " + trendValue(hi)).c_str());
+  updateLabel(trendReading, ("Last sample " + dateText(latest->at, "%a %H:%M") +
+                             "  /  " + trendValue(latest->values[trendMetric])).c_str());
+  if (count == 1) {
+    label(trendChart, "Waiting for another reading to draw the trend.", 16, 25, 590);
+    return;
+  }
+  if (lo == hi) { lo -= 1; hi += 1; }
+  unsigned lines = 0;
+  time_t previousTime = 0;
+  lv_point_t previous{};
+  for (unsigned i = 0; i < displayedHistory.count; ++i) {
+    const auto &sample = displayedHistory.at(i);
+    const float value = sample.values[trendMetric];
+    if (sample.at < start || !std::isfinite(value)) { previousTime = 0; continue; }
+    lv_point_t point{static_cast<lv_coord_t>((sample.at - start) * 623 / localWeather::historySeconds),
+                     static_cast<lv_coord_t>(220 - (value - lo) * 205 / (hi - lo))};
+    if (previousTime && sample.at - previousTime <= 2 * weatherPollIntervalMs / 1000) {
+      auto &segment = trendSegments[lines++];
+      segment[0] = previous;
+      segment[1] = point;
+      auto *line = lv_line_create(trendChart);
+      lv_obj_set_pos(line, 0, 0);
+      lv_line_set_points(line, segment, 2);
+      lv_obj_set_style_line_color(line, color(TEAL), 0);
+      lv_obj_set_style_line_width(line, 3, 0);
+      lv_obj_clear_flag(line, LV_OBJ_FLAG_CLICKABLE);
+    }
+    previous = point;
+    previousTime = sample.at;
+  }
+}
+
+static void openTrends(lv_event_t *event) {
+  if (navigation) return;
+  trendMetric = static_cast<localWeather::Metric>(reinterpret_cast<uintptr_t>(lv_event_get_user_data(event)));
+  auto *screen = newModal("Weather Trends");
+  weatherPanel = WeatherPanel::Trends;
+  for (unsigned i = 0; i < localWeather::MetricCount; ++i) {
+    button(screen, trendNames[i], 20 + i * 191, 66, 185, 44, openTrends,
+           reinterpret_cast<void *>(static_cast<uintptr_t>(i)), i == trendMetric ? 0x147C78 : CARD);
+  }
+  auto *panel = box(screen, 20, 119, 760, 304, CARD);
+  label(panel, trendMetric == localWeather::Rain ? "Rolling 24-hour rainfall at each sample" :
+        trendMetric == localWeather::Gust ? "10-minute peak gust at each sample" : "Last 24 hours",
+        16, 10, 728, &lv_font_montserrat_14, TEAL);
+  trendChart = box(panel, 65, 39, 624, 234, BG, 0);
+  lv_obj_add_flag(trendChart, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_add_event_cb(trendChart, pickTrendPoint, LV_EVENT_CLICKED, nullptr);
+  trendScale = label(panel, "", 16, 277, 728, &lv_font_montserrat_14, MUTED);
+  trendReading = label(screen, "", 24, 438, 752, &lv_font_montserrat_16);
+  lastTrendSample = -1;
+  lastTick = millis() - 1000;
+}
+
 static void weatherScreen(){
   const int xs[]={16,360,568,16,212,408,604},ys[]={76,76,76,254,254,254,254},ws[]={328,192,216,180,180,180,180};
   for(int i=0;i<7;++i){
@@ -182,8 +431,11 @@ static void weatherScreen(){
     weatherValues[i]=label(b,"--",i==0?96:16,i==0?46:55,i==0?216:ws[i]-24,i==0?&lv_font_montserrat_48:i==1?&lv_font_montserrat_32:i==2?&lv_font_montserrat_28:&lv_font_montserrat_24);
     weatherSub[i]=label(b,"",16,i<3?112:99,ws[i]-24,&lv_font_montserrat_14,MUTED);
   }
-  statusLabel=label(root,"",20,424,760,&lv_font_montserrat_16,MUTED);
-  label(root,"Swipe right for Calendar     •     Swipe left for Settings",20,454,760,&lv_font_montserrat_12,MUTED);
+  statusLabel=label(root,"",20,411,760,&lv_font_montserrat_16,MUTED);
+  button(root, "Today at a Glance", 16, 438, 246, 39, openToday, nullptr, CARD);
+  button(root, "Weather Trends", 277, 438, 246, 39, openTrends, nullptr, CARD);
+  alertsButton = button(root, "Weather Alerts", 538, 438, 246, 39, openAlerts, nullptr, CARD);
+  alertBanner = false;
   weatherUpdate();
 }
 static void focusField(lv_event_t *e){
@@ -198,7 +450,7 @@ static lv_obj_t *input(lv_obj_t*p,const char*name,const String&value,int y,bool 
 }
 static void applyEditorSettings() {
   xSemaphoreTake(stateMutex,portMAX_DELAY);settings=draft;
-  if(editKind==2 || editKind==3){shared.events.clear();shared.calendarLoaded=false;shared.calendarError="Loading calendar...";}
+  if(editKind==2 || editKind==3){shared.events.clear();shared.todayEvents.clear();shared.todayWeek=0;shared.calendarLoaded=false;shared.calendarError="Loading calendar...";}
   if(editKind==1){shared.weather=Weather();shared.weatherError="Connecting to station...";}
   xSemaphoreGive(stateMutex);saveSettings();
   if(editKind==2 || editKind==3) calendarRefreshRequested.store(true);
@@ -267,6 +519,16 @@ static void editorSave(lv_event_t*){
   if(editKind==1){draft.station=value(0);draft.station.trim();}
   if(editKind==2){draft.calendarUrl=value(0);draft.calendarToken=value(1);draft.calendarUrl.trim();draft.calendarToken.trim();}
   if(editKind==3){draft.timezone=value(0);draft.timezone.trim();}
+  if (editKind == 4) {
+    char prefix[4];
+    if (!localWeather::postalPrefix(value(0).c_str(), prefix)) {
+      auto *msg = lv_msgbox_create(modal, "Check postal code",
+          "Enter a Canadian postal code, for example A1A 1A1.", nullptr, true);
+      lv_obj_center(msg);
+      return;
+    }
+    draft.postalCode = prefix;
+  }
   if((editKind==0 && (draft.ssid.length()>32 || draft.password.length()>63)) ||
      (editKind==1 && !draft.station.startsWith("http://")) ||
      (editKind==2 && draft.calendarUrl.length() && (!draft.calendarUrl.startsWith("https://script.google.com/macros/s/") || !draft.calendarUrl.endsWith("/exec") || draft.calendarToken.length()<32)) ||
@@ -277,7 +539,7 @@ static void editorSave(lv_event_t*){
 }
 static void timezoneSelect(lv_event_t*e){
   int i=(intptr_t)lv_event_get_user_data(e);if(i<0 || i>=9)return;
-  xSemaphoreTake(stateMutex,portMAX_DELAY);settings.timezone=tzCodes[i];shared.calendarLoaded=false;shared.events.clear();shared.calendarError="Loading calendar...";xSemaphoreGive(stateMutex);
+  xSemaphoreTake(stateMutex,portMAX_DELAY);settings.timezone=tzCodes[i];shared.calendarLoaded=false;shared.events.clear();shared.todayEvents.clear();shared.todayWeek=0;shared.calendarError="Loading calendar...";xSemaphoreGive(stateMutex);
   setenv("TZ",settings.timezone.c_str(),1);tzset();saveSettings();closeModal();redraw=true;calendarDirty=true;
 }
 static void edit(lv_event_t *e){
@@ -289,7 +551,7 @@ static void edit(lv_event_t *e){
     for(int i=0;i<9;++i)button(list,tzNames[i],12,i*58,720,48,timezoneSelect,(void*)(intptr_t)i,settings.timezone==tzCodes[i]?0x147C78:CARD);
     lv_obj_invalidate(modal);return;
   }
-  const char*titles[]={"Wi-Fi setup","Weather station address","Google Calendar setup","Time zone (POSIX)"};
+  const char*titles[]={"Wi-Fi setup","Weather station address","Google Calendar setup","Time zone (POSIX)","Postal code"};
   auto*m=newModal(titles[editKind]);button(m,"Save",570,10,96,44,editorSave);
   if(editKind==2)button(m,"Set up over USB",396,10,158,44,startCalendarUsb,nullptr,CARD);
   form=box(m,24,72,752,164,CARD);lv_obj_add_flag(form,LV_OBJ_FLAG_SCROLLABLE);lv_obj_set_scroll_dir(form,LV_DIR_VER);
@@ -298,6 +560,10 @@ static void edit(lv_event_t *e){
   if(editKind==1)fields[0]=input(form,"Base URL, for example http://192.168.2.149",draft.station,8,false,200);
   if(editKind==2){fields[0]=input(form,"Apps Script web app URL ending in /exec",draft.calendarUrl,8,false,400);fields[1]=input(form,"Bridge token (from your own Apps Script setup)",draft.calendarToken,96,true,128);}
   if(editKind==3)fields[0]=input(form,"Manitoba: MBT5  |  Eastern: EST5EDT,M3.2.0,M11.1.0",draft.timezone,8,false,100);
+  if (editKind == 4) {
+    fields[0] = input(form, "Canadian postal code (first three characters are enough)", draft.postalCode, 8, false, 10);
+    label(form, "Leave blank to clear the location.", 12, 90, 700, &lv_font_montserrat_14, MUTED);
+  }
   lv_keyboard_set_textarea(keyboard,fields[0]);lv_obj_invalidate(modal);
 }
 static void unitsChanged(lv_event_t *e){
@@ -337,13 +603,13 @@ static void openScreenTimeout(lv_event_t *) {
 }
 
 static void settingsScreen(){
-  const char*names[]={"Wi-Fi","Weather station","Google Calendar","Display dimming","Imperial units","Time zone","Screen timeout"};
-  String values[]={settings.ssid.isEmpty()?"Tap to connect":settings.ssid,settings.station,settings.calendarUrl.isEmpty()?"Tap to link":"Configured", "", "°F / mph / in", timezoneName(), screenTimeoutLabel(settings.screenTimeoutSeconds)};
-  int kinds[]={0,1,2,-1,-1,3,-1};
-  for(int i=0;i<7;++i){auto*b=box(root,20,70+i*53,760,48,CARD);
-    label(b,names[i],16,14,220,&lv_font_montserrat_18);
+  const char*names[]={"Wi-Fi","Weather station","Google Calendar","Display dimming","Imperial units","Time zone","Screen timeout","Postal code"};
+  String values[]={settings.ssid.isEmpty()?"Tap to connect":settings.ssid,settings.station,settings.calendarUrl.isEmpty()?"Tap to link":"Configured", "", "°F / mph / in", timezoneName(), screenTimeoutLabel(settings.screenTimeoutSeconds), settings.postalCode.isEmpty() ? "Tap to set location" : settings.postalCode};
+  int kinds[]={0,1,2,-1,-1,3,-1,4};
+  for(int i=0;i<8;++i){auto*b=box(root,20,62+i*47,760,43,CARD);
+    label(b,names[i],16,11,220,&lv_font_montserrat_18);
     if(i==3){auto*s=lv_slider_create(b);lv_obj_set_pos(s,300,20);lv_obj_set_size(s,416,10);lv_slider_set_range(s,20,100);lv_slider_set_value(s,settings.brightness,LV_ANIM_OFF);lv_obj_add_event_cb(s,brightnessChanged,LV_EVENT_VALUE_CHANGED,nullptr);lv_obj_add_event_cb(s,brightnessChanged,LV_EVENT_RELEASED,nullptr);}
-    else if(i==4){label(b,values[i],300,15,320,&lv_font_montserrat_14,MUTED);auto*s=lv_switch_create(b);lv_obj_set_pos(s,680,10);lv_obj_set_size(s,60,30);if(settings.imperial)lv_obj_add_state(s,LV_STATE_CHECKED);lv_obj_add_event_cb(s,unitsChanged,LV_EVENT_VALUE_CHANGED,nullptr);}
+    else if(i==4){label(b,values[i],300,15,320,&lv_font_montserrat_14,MUTED);auto*s=lv_switch_create(b);lv_obj_set_pos(s,680,7);lv_obj_set_size(s,60,30);if(settings.imperial)lv_obj_add_state(s,LV_STATE_CHECKED);lv_obj_add_event_cb(s,unitsChanged,LV_EVENT_VALUE_CHANGED,nullptr);}
     else{auto*l=label(b,values[i]+"  >",250,16,490,&lv_font_montserrat_14,TEAL);lv_label_set_long_mode(l,LV_LABEL_LONG_DOT);lv_obj_add_flag(b,LV_OBJ_FLAG_CLICKABLE);lv_obj_add_event_cb(b,i==6?openScreenTimeout:edit,LV_EVENT_CLICKED,(void*)(intptr_t)kinds[i]);}
   }
   label(root,"Swipe right to return to Weather • Dimming changes image intensity",24,450,750,&lv_font_montserrat_12,MUTED);
@@ -474,7 +740,7 @@ void uiTouch(bool pressed,int x,int y){
   static int sx=0,sy=0,ex=0,ey=0;static uint32_t at=0;
   if(pressed){if(!touchDown){sx=x;sy=y;at=millis();touchDown=true;}ex=x;ey=y;}
   else if(touchDown){touchDown=false;int dx=ex-sx,dy=ey-sy;
-    bool editing=modal || (page==2 && sy>=229 && sy<277);
+    bool editing=modal || (page==2 && sy>=203 && sy<246);
     if(!editing && millis()-at<1200 && abs(dx)>=100 && abs(dx)>abs(dy)*1.6f){int next=page+(dx>0?-1:1);if(next>=0 && next<=2)navigation=dx>0?-1:1;}
   }
 }
@@ -488,8 +754,49 @@ void uiTick(){
 
   const bool updateCalendar = page == 0 && !modal && !touchDown &&
     (!contentScroller || !lv_obj_is_scrolling(contentScroller));
+  const time_t clock = time(nullptr);
+  LocalForecast forecast;
+  String todayAgenda;
+  bool trendChanged = false;
   xSemaphoreTake(stateMutex, portMAX_DELAY);
   if (page == 1) {
+    {
+      const bool matches = localForecast.postalCode == settings.postalCode;
+      if (matches && (weatherPanel == WeatherPanel::Today || weatherPanel == WeatherPanel::Alerts)) forecast = localForecast;
+      const bool hasAlerts = matches && !settings.postalCode.isEmpty() && forecastFresh(localForecast, clock) &&
+          std::any_of(localForecast.alerts.begin(), localForecast.alerts.end(),
+                      [clock](const auto &alert) { return activeAlert(alert, clock); });
+      if (hasAlerts != alertBanner) {
+        alertBanner = hasAlerts;
+        lv_obj_set_style_bg_color(alertsButton, color(hasAlerts ? 0x9A491E : CARD), 0);
+        updateLabel(lv_obj_get_child(alertsButton, 0), hasAlerts ? "Active Weather Alerts" : "Weather Alerts");
+      }
+    }
+    if (weatherPanel == WeatherPanel::Today) {
+      if (settings.calendarUrl.isEmpty()) todayAgenda = "Connect Google Calendar in Settings.";
+      else if (shared.todayWeek != core::sunday(clock, 0)) todayAgenda = "Waiting for today's calendar...";
+      else {
+        const auto segments = core::daySegments(shared.todayEvents, core::midnight(clock));
+        unsigned shown = 0;
+        for (const auto &segment : segments) {
+          const auto &event = shared.todayEvents[segment.event];
+          if (core::endOf(event) <= clock || shown >= 2) continue;
+          if (shown++) todayAgenda += "\n";
+          todayAgenda += (event.allDay ? String("All day") : dateText(event.start, "%H:%M")) +
+                         "   " + event.title.c_str();
+        }
+        if (!shown) todayAgenda = "No more events today.";
+        if (shared.todayReceived && millis() - shared.todayReceived > 11 * 60 * 1000) todayAgenda += "\nCalendar may be out of date";
+      }
+    }
+    if (weatherPanel == WeatherPanel::Trends) {
+      const time_t newest = weatherHistory.count ? weatherHistory.at(weatherHistory.count - 1).at : 0;
+      if (newest != lastTrendSample) {
+        displayedHistory = weatherHistory;
+        lastTrendSample = newest;
+        trendChanged = true;
+      }
+    }
     if (shared.weather.loaded != snapshot.weather.loaded ||
         shared.weather.received != snapshot.weather.received) {
       snapshot.weather = shared.weather;
@@ -509,7 +816,10 @@ void uiTick(){
     snapshot.truncated = shared.truncated;
   }
   xSemaphoreGive(stateMutex);
-  time_t clock=time(nullptr);String clockText=clock>1700000000?dateText(clock,"%H:%M"):"--:--";
+  if (weatherPanel == WeatherPanel::Today) updateToday(forecast, todayAgenda, clock);
+  if (weatherPanel == WeatherPanel::Alerts) updateAlerts(forecast, clock);
+  if (trendChanged) drawTrend();
+  String clockText=clock>1700000000?dateText(clock,"%H:%M"):"--:--";
   clockText+=WiFi.status()==WL_CONNECTED?String("  ")+LV_SYMBOL_WIFI:"  !";updateLabel(clockLabel,clockText.c_str());
   if(page==1)weatherUpdate();
   if(snapshot.calendarError!=lastCalendarError){calendarDirty=true;lastCalendarError=snapshot.calendarError;}

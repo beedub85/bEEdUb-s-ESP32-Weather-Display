@@ -6,12 +6,14 @@
 #include <freertos/semphr.h>
 #include "core.hpp"
 #include "screen_idle.hpp"
+#include "local_weather.hpp"
 
 constexpr uint32_t weatherPollIntervalMs = 5 * 60 * 1000;
 constexpr uint32_t weatherStaleAfterMs = weatherPollIntervalMs + 30 * 1000;
 struct Settings {
   String ssid, password, station="http://192.168.2.149", calendarUrl, calendarToken;
   String timezone=core::winnipegTimeZone;
+  String postalCode;
   bool imperial=false;
   int brightness=100;
   uint32_t screenTimeoutSeconds = ScreenIdle::defaultTimeoutSeconds;
@@ -27,9 +29,31 @@ struct Weather {
   String sensors;
   String firmware, uptime, ip, rssi, ssid, stationTime;
 };
+struct ForecastHour {
+  time_t at = 0;
+  float temperature = NAN;
+  int precipitation = -1;
+  String condition;
+};
+struct WeatherAlert {
+  String title;
+  time_t expires = 0;
+};
+struct LocalForecast {
+  String postalCode, location, region, error;
+  time_t checked = 0;
+  bool alertsKnown = false;
+  std::vector<ForecastHour> hours;
+  std::vector<WeatherAlert> alerts;
+};
+extern LocalForecast localForecast;
+extern localWeather::History weatherHistory;
+
 struct State {
   Weather weather;
-  core::Events events;
+  core::Events events, todayEvents;
+  time_t todayWeek = 0;
+  uint32_t todayReceived = 0;
   time_t calendarWeek=0;
   uint32_t calendarReceived=0;
   bool calendarLoaded=false, truncated=false;
@@ -39,7 +63,7 @@ extern Settings settings;
 extern State shared;
 extern SemaphoreHandle_t stateMutex;
 extern volatile int requestedWeek;
-extern std::atomic<bool> calendarRefreshRequested;
+extern std::atomic<bool> calendarRefreshRequested, todayOverviewOpen;
 void loadSettings();
 void saveSettings();
 void startNetwork();

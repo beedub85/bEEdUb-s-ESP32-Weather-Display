@@ -5,11 +5,14 @@
 #include <WiFiClientSecure.h>
 #include <ArduinoJson.h>
 #include "google_roots.h"
+#include "weather_roots.h"
 Settings settings;
 State shared;
+LocalForecast localForecast;
+localWeather::History weatherHistory;
 SemaphoreHandle_t stateMutex;
 volatile int requestedWeek=0;
-std::atomic<bool> calendarRefreshRequested{false};
+std::atomic<bool> calendarRefreshRequested{false}, todayOverviewOpen{false};
 static void lock(){xSemaphoreTake(stateMutex,portMAX_DELAY);}
 static void unlock(){xSemaphoreGive(stateMutex);}
 void loadSettings(){
@@ -21,6 +24,7 @@ void loadSettings(){
   settings.timezone = core::normalizeTimeZone(savedTimezone.c_str());
   settings.imperial=p.getBool("imperial",false);settings.brightness=p.getInt("dim",100);
   settings.screenTimeoutSeconds = ScreenIdle::normalizeTimeout(p.getUInt("screenTimeout", ScreenIdle::defaultTimeoutSeconds));
+  settings.postalCode = p.getString("postal", "");
   p.end();
   setenv("TZ",settings.timezone.c_str(),1);tzset();
 }
@@ -31,6 +35,7 @@ void saveSettings(){
   p.putString("calurl",c.calendarUrl);p.putString("caltoken",c.calendarToken);p.putString("tz",c.timezone);
   p.putBool("imperial",c.imperial);p.putInt("dim",c.brightness);
   p.putUInt("screenTimeout", c.screenTimeoutSeconds);
+  p.putString("postal", c.postalCode);
   p.end();
 }
 class ExternalJsonAllocator:public ArduinoJson::Allocator {
@@ -89,6 +94,137 @@ static bool fetchWeather(const Settings &c,Weather &w,String &error){
   }else error=code>0?"Station HTTP "+String(code):"Station not reachable";
   http.end();return ok;
 }
+static bool publicJson(const String &url, JsonDocument &result, size_t cap, JsonDocument *filter = nullptr) {
+  WiFiClientSecure tls;
+  tls.setCACert(WEATHER_ROOTS);
+  tls.setHandshakeTimeout(5);
+  HTTPClient http;
+  if (!http.begin(tls, url)) return false;
+  http.setConnectTimeout(4000);
+  http.setTimeout(5000);
+  http.useHTTP10(true);
+  if (http.GET() != 200 || http.getSize() > static_cast<int>(cap)) return false;
+  BoundedResponse body(cap);
+  if (http.writeToStream(&body) < 0) return false;
+  if (filter) {
+    return !deserializeJson(result, body.data.data(), body.data.size(),
+                            DeserializationOption::Filter(*filter));
+  }
+  return !deserializeJson(result, body.data.data(), body.data.size());
+}
+
+static constexpr char cityPages[] =
+    "https://api.weather.gc.ca/collections/citypageweather-realtime/items";
+
+static String cityForPostalCode(const String &postal) {
+  ExternalJsonAllocator allocator;
+  JsonDocument lookup(&allocator), placesFilter;
+  placesFilter["places"][0]["latitude"] = true;
+  placesFilter["places"][0]["longitude"] = true;
+  if (!publicJson(String("https://api.zippopotam.us/CA/") + postal, lookup, 16000, &placesFilter)) return "";
+  double lat = 0, lon = 0;
+  unsigned count = 0;
+  for (JsonObject place : lookup["places"].as<JsonArray>()) {
+    const double y = atof(place["latitude"] | "0");
+    const double x = atof(place["longitude"] | "0");
+    if (!(y >= 40 && y <= 84 && x >= -142 && x <= -50)) continue;
+    lat += y;
+    lon += x;
+    ++count;
+  }
+  if (!count) return "";
+  lat /= count;
+  lon /= count;
+  const double lonScale = cos(lat * 0.01745329252);
+  for (double radius : {0.5, 1.5, 3.0}) {
+    JsonDocument cities(&allocator), filter;
+    filter["features"][0]["id"] = true;
+    filter["features"][0]["geometry"]["coordinates"] = true;
+    const String url = String(cityPages) + "?f=json&limit=100&properties=name&bbox=" +
+        String(lon - radius / lonScale, 4) + "," + String(lat - radius, 4) + "," +
+        String(lon + radius / lonScale, 4) + "," + String(lat + radius, 4);
+    if (!publicJson(url, cities, 60000, &filter)) return "";
+    double best = INFINITY;
+    String id;
+    for (JsonObject city : cities["features"].as<JsonArray>()) {
+      const char *candidate = city["id"] | "";
+      if (strlen(candidate) > 20 || !*candidate || strspn(candidate, "abcdefghijklmnopqrstuvwxyz0123456789-") != strlen(candidate)) continue;
+      auto coordinates = city["geometry"]["coordinates"].as<JsonArray>();
+      if (coordinates.size() != 2) continue;
+      double dx = (coordinates[0].as<double>() - lon) * lonScale;
+      double dy = coordinates[1].as<double>() - lat;
+      const double distance = dx * dx + dy * dy;
+      // A point outside the search box cannot be closer than radius.
+      if (distance < best && distance <= radius * radius) {
+        best = distance;
+        id = candidate;
+      }
+    }
+    if (id.length()) return id;
+  }
+  return "";
+}
+
+static time_t utcTimestamp(const char *s) {
+  const size_t length = strlen(s);
+  const char *format = length == 20 && s[19] == 'Z' ? "%Y-%m-%dT%H:%M:%SZ" :
+      length == 14 && strspn(s, "0123456789") == 14 ? "%Y%m%d%H%M%S" : nullptr;
+  if (!format) return 0;
+  tm date{};
+  const char *end = strptime(s, format, &date);
+  return end && !*end ? timegm(&date) : 0;
+}
+
+static String english(JsonVariantConst value) {
+  if (value.is<const char *>()) return value.as<const char *>();
+  return value["en"] | "";
+}
+
+static bool fetchLocalForecast(const String &id, LocalForecast &result) {
+  ExternalJsonAllocator allocator;
+  JsonDocument data(&allocator), filter;
+  JsonObject properties = filter["properties"].to<JsonObject>();
+  properties["name"]["en"] = true;
+  properties["lastUpdated"] = true;
+  properties["region"]["en"] = true;
+  properties["warnings"] = true;
+  JsonObject hourly = properties["hourlyForecastGroup"]["hourlyForecasts"][0].to<JsonObject>();
+  hourly["timestamp"] = true;
+  hourly["temperature"]["value"]["en"] = true;
+  hourly["lop"]["value"]["en"] = true;
+  hourly["condition"]["en"] = true;
+  if (!publicJson(String(cityPages) + "/" + id + "?f=json", data, 160000, &filter)) return false;
+  auto city = data["properties"];
+  result.location = english(city["name"]);
+  result.region = english(city["region"]);
+  if (result.location.isEmpty()) return false;
+  for (JsonObject row : city["hourlyForecastGroup"]["hourlyForecasts"].as<JsonArray>()) {
+    const time_t at = utcTimestamp(row["timestamp"] | "");
+    if (!at || result.hours.size() >= 48) continue;
+    result.hours.push_back({at, number(row["temperature"]["value"]["en"]),
+                            row["lop"]["value"]["en"] | -1, english(row["condition"])});
+  }
+  JsonVariantConst warnings = city["warnings"];
+  JsonArrayConst events = warnings.is<JsonArrayConst>() ? warnings.as<JsonArrayConst>() :
+                          warnings["events"].as<JsonArrayConst>();
+  result.alertsKnown = !events.isNull() ||
+      (warnings.is<JsonObjectConst>() && warnings.size() == 0);
+  for (JsonObjectConst row : events) {
+    String title = english(row["description"]);
+    if (title.isEmpty()) title = english(row["type"]);
+    String expires = english(row["expiryTime"]);
+    if (expires.isEmpty()) expires = english(row["expiry"]);
+    if (title.length() && result.alerts.size() < 24)
+      result.alerts.push_back({title, utcTimestamp(expires.c_str())});
+    else if (title.isEmpty()) result.alertsKnown = false;
+  }
+  result.checked = time(nullptr);
+  const auto published = utcTimestamp(city["lastUpdated"] | "");
+  if (published && result.checked - published > 2 * 60 * 60)
+    result.error = "Environment Canada data is out of date";
+  return true;
+}
+
 static bool trustedCalendarURL(const String &url){
   return url.startsWith("https://script.google.com/macros/s/") && url.endsWith("/exec");
 }
@@ -126,7 +262,9 @@ static bool fetchCalendar(const Settings &c,time_t week,core::Events &events,boo
 }
 static void networkTask(void*){
   WiFi.mode(WIFI_STA);WiFi.setSleep(false);WiFi.setAutoReconnect(true);
-  String lastSSID,lastPassword,lastTZ,lastStation;
+  String lastSSID,lastPassword,lastTZ,lastStation,lastPostal,cityId;
+  uint32_t localAt = 0;
+  bool localAttempted = false;
   constexpr uint32_t calendarPollIntervalMs = 5 * 60 * 1000;
   uint32_t weatherAt = 0, calendarAt = 0, lastReconnect = 0;
   bool calendarAttempted = false;
@@ -140,7 +278,7 @@ static void networkTask(void*){
     }
     if(WiFi.status()!=WL_CONNECTED){
       wasConnected=false;
-      lock();shared.weatherError=c.ssid.isEmpty()?"Swipe left to set up Wi-Fi":"Connecting to Wi-Fi...";if(shared.calendarLoaded)shared.calendarError="Wi-Fi disconnected";unlock();
+      lock();if(localForecast.postalCode==c.postalCode)localForecast.error="Wi-Fi disconnected";shared.weatherError=c.ssid.isEmpty()?"Swipe left to set up Wi-Fi":"Connecting to Wi-Fi...";if(shared.calendarLoaded)shared.calendarError="Wi-Fi disconnected";unlock();
       if(c.ssid.length() && millis()-lastReconnect>20000){WiFi.reconnect();lastReconnect=millis();}
       vTaskDelay(pdMS_TO_TICKS(300));continue;
     }
@@ -148,9 +286,14 @@ static void networkTask(void*){
     wasConnected = true;
     uint32_t now = millis();
     if (justConnected || c.station != lastStation || now - weatherAt >= weatherPollIntervalMs) {
+      if (lastStation != c.station) {
+        lock();weatherHistory.next = weatherHistory.count = 0;unlock();
+      }
       lastStation = c.station;
       Weather w;String error;bool ok=fetchWeather(c,w,error);
-      lock();if(c.station==settings.station){if(ok){shared.weather=std::move(w);shared.weatherError="";}else shared.weatherError=error;}unlock();weatherAt=millis();
+      lock();if(c.station==settings.station){if(ok){const time_t sampled = time(nullptr);
+        if (sampled > 1700000000) weatherHistory.add({sampled, {w.temp, w.press, w.gust10, w.rain}});
+        shared.weather=std::move(w);shared.weatherError="";}else shared.weatherError=error;}unlock();weatherAt=millis();
     }
     const time_t clock = time(nullptr);
     if (clock > 1700000000) {
@@ -159,7 +302,9 @@ static void networkTask(void*){
         lock();
         c = settings;
         unlock();
-        const time_t week = core::sunday(clock, requestedWeek);
+        const time_t selectedWeek = core::sunday(clock, requestedWeek);
+        const time_t week = !manualRefresh && todayOverviewOpen.load() ?
+            core::sunday(clock, 0) : selectedWeek;
         core::Events events;
         String error;
         bool truncated = false;
@@ -171,13 +316,20 @@ static void networkTask(void*){
         if (c.calendarUrl == settings.calendarUrl && c.calendarToken == settings.calendarToken &&
             c.timezone == settings.timezone) {
           if (ok) {
-            shared.events = std::move(events);
-            shared.calendarWeek = week;
-            shared.calendarLoaded = true;
-            shared.truncated = truncated;
-            shared.calendarReceived = millis();
-            shared.calendarError = "";
-          } else {
+            if (week == core::sunday(clock, 0)) {
+              shared.todayEvents = events;
+              shared.todayWeek = week;
+              shared.todayReceived = millis();
+            }
+            if (week == selectedWeek) {
+              shared.events = std::move(events);
+              shared.calendarWeek = week;
+              shared.calendarLoaded = true;
+              shared.truncated = truncated;
+              shared.calendarReceived = millis();
+              shared.calendarError = "";
+            }
+          } else if (week == selectedWeek) {
             shared.calendarError = error;
           }
         }
@@ -187,6 +339,32 @@ static void networkTask(void*){
       lock();
       shared.calendarError = "Waiting for internet time sync";
       unlock();
+    }
+    if (c.postalCode.isEmpty()) {
+      lastPostal = "";
+      cityId = "";
+      localAttempted = false;
+    }
+    if (clock > 1700000000 && !c.postalCode.isEmpty() &&
+        (justConnected || !localAttempted || c.postalCode != lastPostal || millis() - localAt >= weatherPollIntervalMs)) {
+      if (c.postalCode != lastPostal) cityId = "";
+      lastPostal = c.postalCode;
+      if (cityId.isEmpty()) cityId = cityForPostalCode(c.postalCode);
+      LocalForecast result;
+      result.postalCode = c.postalCode;
+      const bool ok = !cityId.isEmpty() && fetchLocalForecast(cityId, result);
+      lock();
+      if (c.postalCode == settings.postalCode) {
+        if (ok) localForecast = std::move(result);
+        else {
+          if (localForecast.postalCode != c.postalCode) localForecast = LocalForecast{};
+          localForecast.postalCode = c.postalCode;
+          localForecast.error = cityId.isEmpty() ? "Postal area lookup unavailable" : "Environment Canada feed unavailable";
+        }
+      }
+      unlock();
+      localAt = millis();
+      localAttempted = true;
     }
     vTaskDelay(pdMS_TO_TICKS(150));
   }

@@ -1,5 +1,6 @@
 #include "core.hpp"
 #include "screen_idle.hpp"
+#include "local_weather.hpp"
 #include <cassert>
 #include <cstdlib>
 #include <iostream>
@@ -7,6 +8,20 @@ using namespace core;
 static time_t at(int year,int month,int day,int hour=0,int min=0){tm t={};t.tm_year=year-1900;t.tm_mon=month-1;t.tm_mday=day;t.tm_hour=hour;t.tm_min=min;t.tm_isdst=-1;return mktime(&t);}
 static Event timed(time_t start,time_t end){Event e;e.start=start;e.end=end;return e;}
 int main(){
+ char prefix[4];
+ assert(localWeather::postalPrefix("r0j 1e0", prefix) && std::string_view(prefix) == "R0J");
+ assert(localWeather::postalPrefix("B3H", prefix) && std::string_view(prefix) == "B3H");
+ assert(localWeather::postalPrefix(" ", prefix) && !*prefix);
+ assert(!localWeather::postalPrefix("R0J1", prefix));
+ assert(!localWeather::postalPrefix("D0J", prefix));
+ localWeather::History history;
+ for (unsigned i = 1; i <= localWeather::sampleCount + 5; ++i) history.add({time_t(i) * 300});
+ assert(history.count == localWeather::sampleCount && history.at(0).at == 1800);
+ const auto newest = history.at(history.count - 1);
+ history.add(newest);
+ assert(history.count == localWeather::sampleCount && history.at(0).at == 1800);
+ history.add({300});
+ assert(history.count == 1 && history.at(0).at == 300);
  ScreenIdle screen;
  static_assert(ScreenIdle::defaultTimeoutSeconds == 60);
  static_assert(ScreenIdle::normalizeTimeout(120) == 120);
