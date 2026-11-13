@@ -15,6 +15,7 @@ struct Settings {
   String timezone=core::winnipegTimeZone;
   String postalCode, printRoomUrl, printRoomKey;
   bool imperial=false;
+  bool rotateScreen=false;
   int brightness=100;
   uint32_t screenTimeoutSeconds = ScreenIdle::defaultTimeoutSeconds;
 };

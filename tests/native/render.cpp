@@ -11,7 +11,7 @@ static lv_color_t fb[800*480],buf[800*32];
 static void flush(lv_disp_drv_t*d,const lv_area_t*a,lv_color_t*p){for(int y=a->y1;y<=a->y2;++y)for(int x=a->x1;x<=a->x2;++x)fb[y*800+x]=*p++;lv_disp_flush_ready(d);}
 static void frames(){for(int i=0;i<5;++i){testMillis+=30;lv_tick_inc(30);uiTick();lv_timer_handler();}}
 static void capture(const char*name){lv_obj_invalidate(lv_scr_act());lv_obj_invalidate(lv_layer_top());testMillis+=1100;lv_tick_inc(1100);frames();std::ofstream f(name,std::ios::binary);f<<"P6\n800 480\n255\n";for(auto c:fb){auto c32=lv_color_to32(c);char rgb[3]={(char)((c32>>16)&255),(char)((c32>>8)&255),(char)(c32&255)};f.write(rgb,3);}}
-static void swipe(bool right){uiTouch(true,400,185);uiTouch(true,right?600:200,185);uiTouch(false,0,0);frames();}
+static void swipe(bool right){uiTouch(true,400,170);uiTouch(true,right?600:200,170);uiTouch(false,0,0);frames();}
 static lv_obj_t *findButton(lv_obj_t*p,const char*text){for(int i=0;i<lv_obj_get_child_cnt(p);++i){auto*c=lv_obj_get_child(p,i);if(lv_obj_check_type(c,&lv_label_class) && std::string(lv_label_get_text(c))==text && lv_obj_check_type(p,&lv_btn_class))return p;auto*r=findButton(c,text);if(r)return r;}return nullptr;}
 static lv_obj_t *findLabel(lv_obj_t*p,const char*text){
  for(int i=0;i<lv_obj_get_child_cnt(p);++i){auto*c=lv_obj_get_child(p,i);if(lv_obj_check_type(c,&lv_label_class) && std::string(lv_label_get_text(c))==text)return c;auto*r=findLabel(c,text);if(r)return r;}return nullptr;
@@ -74,8 +74,18 @@ int main(int argc,char**argv){
  assert(lv_obj_get_scroll_y(lv_obj_get_parent(lv_obj_get_parent(hour)))==14*54);
  swipe(false);swipe(false);capture("settings.ppm");
  // A swipe along the dimming row must not navigate away from Settings.
- uiTouch(true,350,225);uiTouch(true,650,225);uiTouch(false,0,0);frames();assert(std::string(lv_label_get_text(lv_obj_get_child(lv_scr_act(),0)))=="Settings");
+ uiTouch(true,350,204);uiTouch(true,650,204);uiTouch(false,0,0);frames();assert(std::string(lv_label_get_text(lv_obj_get_child(lv_scr_act(),0)))=="Settings");
  assert(!findButton(lv_scr_act(),"Calendar") && !findButton(lv_scr_act(),"Weather") && !findButton(lv_scr_act(),"Settings"));
+ auto *rotation = findLabel(lv_scr_act(), "Rotate screen 180°");
+ assert(rotation);
+ auto *rotationSwitch = lv_obj_get_child(lv_obj_get_parent(rotation), 1);
+ assert(lv_obj_check_type(rotationSwitch, &lv_switch_class));
+ lv_obj_add_state(rotationSwitch, LV_STATE_CHECKED);
+ lv_event_send(rotationSwitch, LV_EVENT_VALUE_CHANGED, nullptr);
+ assert(settings.rotateScreen);
+ lv_obj_clear_state(rotationSwitch, LV_STATE_CHECKED);
+ lv_event_send(rotationSwitch, LV_EVENT_VALUE_CHANGED, nullptr);
+ assert(!settings.rotateScreen);
  auto *timeout = findLabel(lv_scr_act(), "Screen timeout");
  assert(timeout && findLabel(lv_scr_act(), "1 minute  >"));
  lv_event_send(lv_obj_get_parent(timeout), LV_EVENT_CLICKED, nullptr);

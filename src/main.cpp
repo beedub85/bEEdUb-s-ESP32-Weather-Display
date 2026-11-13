@@ -6,6 +6,7 @@
 #include <lvgl.h>
 #include <esp_heap_caps.h>
 #include "app.hpp"
+#include "screen_rotation.hpp"
 using namespace esp_panel::board;
 using namespace esp_panel::drivers;
 static Board *board;
@@ -15,8 +16,18 @@ static lv_indev_drv_t inputDriver;
 static lv_disp_t *display;
 static ScreenIdle screenIdle;
 static bool backlightOff = false;
+static lv_color_t *rotationBuffer;
+static constexpr int drawPixels = screenRotation::width * 24;
 static void flush(lv_disp_drv_t *d,const lv_area_t *a,lv_color_t *pixels) {
-  board->getLCD()->drawBitmap(a->x1,a->y1,a->x2-a->x1+1,a->y2-a->y1+1,(const uint8_t*)pixels);
+  const int width = a->x2 - a->x1 + 1;
+  const int height = a->y2 - a->y1 + 1;
+  if (settings.rotateScreen && rotationBuffer) {
+    screenRotation::copyTile(pixels, rotationBuffer, width * height);
+    board->getLCD()->drawBitmap(screenRotation::flipX(a->x2), screenRotation::flipY(a->y2),
+                               width, height, reinterpret_cast<const uint8_t *>(rotationBuffer));
+  } else {
+    board->getLCD()->drawBitmap(a->x1, a->y1, width, height, reinterpret_cast<const uint8_t *>(pixels));
+  }
   lv_disp_flush_ready(d); // RGB drawBitmap synchronously copies to its framebuffer.
 }
 static void touch(lv_indev_drv_t *,lv_indev_data_t *data) {
@@ -24,10 +35,11 @@ static void touch(lv_indev_drv_t *,lv_indev_data_t *data) {
   const int count = board->getTouch()->readPoints(&point, 1, 0);
   const bool accepted = screenIdle.acceptsTouch(count > 0, millis());
   if (accepted) {
-    data->point.x = point.x;
-    data->point.y = point.y;
+    const bool rotated = settings.rotateScreen && rotationBuffer;
+    data->point.x = rotated ? screenRotation::flipX(point.x) : point.x;
+    data->point.y = rotated ? screenRotation::flipY(point.y) : point.y;
     data->state = LV_INDEV_STATE_PRESSED;
-    uiTouch(true, point.x, point.y);
+    uiTouch(true, data->point.x, data->point.y);
   } else {
     data->state = LV_INDEV_STATE_RELEASED;
     uiTouch(false, 0, 0);
@@ -93,10 +105,13 @@ void setup() {
   loadSettings();
   board=new Board(); assert(board->init()); assert(board->begin());
   lv_init();
-  auto *buffer=(lv_color_t*)heap_caps_malloc(800*24*sizeof(lv_color_t),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+  auto *buffer=(lv_color_t*)heap_caps_malloc(drawPixels*sizeof(lv_color_t),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
   assert(buffer);
-  lv_disp_draw_buf_init(&drawBuffer,buffer,nullptr,800*24);
-  lv_disp_drv_init(&displayDriver);displayDriver.hor_res=800;displayDriver.ver_res=480;
+  rotationBuffer = static_cast<lv_color_t *>(
+      heap_caps_malloc(drawPixels * sizeof(lv_color_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+  if (!rotationBuffer) Serial.println("Rotation buffer unavailable");
+  lv_disp_draw_buf_init(&drawBuffer,buffer,nullptr,drawPixels);
+  lv_disp_drv_init(&displayDriver);displayDriver.hor_res=screenRotation::width;displayDriver.ver_res=screenRotation::height;
   displayDriver.flush_cb=flush;displayDriver.draw_buf=&drawBuffer;display=lv_disp_drv_register(&displayDriver);
   lv_indev_drv_init(&inputDriver);inputDriver.type=LV_INDEV_TYPE_POINTER;inputDriver.read_cb=touch;lv_indev_drv_register(&inputDriver);
   uiBegin();startNetwork();
