@@ -8,19 +8,44 @@ Weather cards show temperature, humidity, wind, pressure, rolling 24-hour rainfa
 
 Calendar has a 'Today' agenda and a Week view. The week runs from Sunday through Saturday. Scroll vertically for the rest of the day; tap an event for details. Arrow buttons navigate weeks, and "This Week" will return to the current week. "Today" returns to today's agenda. Calendar sync runs automatically every five minutes. Tap Refresh to fetch the selected week on demand. After a manual refresh, the next automatic sync waits five minutes. The integration will support up to 100 events per week and up to 8 calendars. A Google Apps Script is provided using Google's Calendar API. The script is created and deployed within your local account; no data is stored in a configuration file. Enter the generated URL and token on the touchscreen or transfer them with the Windows USB helper.
 
-### More weather screens
+### Weather dashboard cards
 
-- **Today at a Glance** combines current station temperature and reported high/low with up to two remaining calendar events and four hourly forecasts.
-- **Weather Trends** charts temperature, pressure, 10-minute gust, and rolling 24-hour rain from the display's five-minute station polls. Tap the chart to inspect a reading. History builds after time sync, leaves gaps for missing readings, and resets when the display restarts or the station address changes.
-- **Weather Alerts** shows advisories, watches, warnings, and statements from the matched Environment Canada city page when available. The Weather Alerts shortcut highlights when fresh active alerts are present. The screen identifies unavailable or stale data. Keep your usual emergency alert channels.
+Tap a station card to see its related readings. Use the shortcuts along the bottom of Weather for these screens:
 
-Set **Settings → Postal code** for the forecast and alerts. Enter your Canadian postal code and tap **Save**. The display retains and sends only the first three characters to Zippopotam.us. It selects a nearby Environment Canada city page using the postal area's approximate coordinates and shows the matched location on both screens. A rural postal area can span multiple warning regions. Check the displayed region for your location. A blank field clears the location. This setting leaves the station address and clock time zone as configured.
+| Screen | What it shows |
+| --- | --- |
+| **Today at a Glance** | Your station's current temperature and reported high and low, up to two remaining Google Calendar events today, and up to four hourly forecasts. |
+| **Weather Trends** | Temperature, pressure, 10-minute peak wind gusts, and rolling 24-hour rainfall. The display samples the station every five minutes. Tap the chart to inspect a reading. History starts after time sync and clears when the display restarts or the station address changes. |
+| **Weather Alerts** | Active advisories, watches, warnings, and statements for the matched Environment Canada area, with expiry times when available. The shortcut highlights when fresh active alerts are present. |
 
-Weather data source: [Environment and Climate Change Canada, City Page Weather](https://api.weather.gc.ca/collections/citypageweather-realtime).
+#### Environment Canada forecast and alerts
+
+1. From Weather, swipe **right** to **Settings** and tap **Postal code**.
+2. Enter your Canadian postal code and tap **Save**. The first three characters are enough. The firmware retains and sends only that prefix to Zippopotam.us, then uses the returned approximate coordinates to select a nearby Environment Canada city page.
+3. Swipe **left** to return to Weather. Open **Today at a Glance** for the hourly forecast or **Weather Alerts** for the alert region and status. Confirm the matched location covers your area, especially if your postal prefix spans several towns.
+
+The public feed is checked about every five minutes and needs Wi-Fi, internet access, and a synced clock. A blank postal code clears the forecast location. The station cards still read your own ESP32 weather station. If the lookup fails, the message identifies the postal lookup, Environment Canada location search, or feed request. [Environment and Climate Change Canada City Page Weather](https://api.weather.gc.ca/collections/citypageweather-realtime)
 
 ### Print Room
 
-Tap **Print Room** on the Weather dashboard for read-only printer progress, status, temperatures, and optional room sensors. Set up the local Home Assistant bridge and enter its address under **Settings → Print Room**. [Print Room setup](docs/PRINT_ROOM_SETUP.md)
+![Print Room on the 800 × 480 display, rendered from firmware with sample X2D and room sensor data](docs/print-room.png)
+
+**Connect the printer to Home Assistant**
+
+1. Connect your Bambu printer to Wi-Fi and install the [Bambu Lab integration](https://docs.page/greghesp/ha-bambulab/installation) in Home Assistant. Add **Bambu Lab** under **Settings → Devices & Services → Add Integration**.
+2. Follow the integration's setup wizard. For its LAN connection option, enter the printer serial number, LAN IP, and access code in Home Assistant. On the X2D, the IP and access code are under **Settings → LAN Only** on the printer. If you use Bambu Handy, check the printer's LAN Only warning before changing its mode. [Integration setup](https://docs.page/greghesp/ha-bambulab/setup)
+3. In Home Assistant, open **Developer tools → States** and confirm the printer status and progress entities report values. Note their entity IDs.
+
+**Start the bridge on a computer on your local network**
+
+1. Copy `print-room-bridge/config.example.json` to a private file outside the repository. Set your Home Assistant URL and replace the example sensor IDs. The `status` mapping is required. Progress, finish time, printer temperatures, and room sensors depend on the optional entities you map.
+2. Start the bridge using the PowerShell commands in the setup guide. Enter your Home Assistant token on that computer and copy the separate 32-character **Display bridge key** printed in the terminal. Keep the bridge running on a trusted LAN. [Bridge commands and troubleshooting](docs/PRINT_ROOM_SETUP.md)
+
+**Connect the Waveshare display**
+
+1. From Weather, swipe **right**, tap **Settings → Print Room**, and enter the bridge URL, for example `http://192.168.1.10:8787/status`. Use the bridge computer's IP address.
+2. Scroll down to **Bridge access key**, enter the 32-character key printed by the bridge, and tap **Save**.
+3. Swipe **left** back to Weather and tap **Print Room**. The read-only screen checks for updates every three seconds while open.
 
 ### Screen rotation
 
