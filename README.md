@@ -26,6 +26,10 @@ Tap a station card to see its related readings. Use the shortcuts along the bott
 
 The public feed is checked about every five minutes and needs Wi-Fi, internet access, and a synced clock. A blank postal code clears the forecast location. The station cards still read your own ESP32 weather station. If the lookup fails, the message identifies the postal lookup, Environment Canada location search, or feed request. [Environment and Climate Change Canada City Page Weather](https://api.weather.gc.ca/collections/citypageweather-realtime)
 
+### Station Health
+
+Tap **Station Health** below the Weather cards to see the station's own Wi-Fi signal, network, IP address, uptime, last successful reading, and sensor status. The Wi-Fi icon in the header refers to the display's connection.
+
 ### Print Room
 
 ![Print Room on the 800 × 480 display, rendered from firmware with sample X2D and room sensor data](docs/print-room.png)
@@ -46,6 +50,8 @@ The public feed is checked about every five minutes and needs Wi-Fi, internet ac
 1. From Weather, swipe **right**, tap **Settings → Print Room**, and enter the bridge URL, for example `http://192.168.1.10:8787/status`. Use the bridge computer's IP address.
 2. Scroll down to **Bridge access key**, enter the 32-character key printed by the bridge, and tap **Save**.
 3. Swipe **left** back to Weather and tap **Print Room**. The read-only screen checks for updates every three seconds while open.
+
+A configured Print Room bridge is checked every 10 seconds in the background. **Print complete** or **Print paused** appears on the Weather dashboard while the bridge reports that status. Tap the banner to open Print Room.
 
 ### Screen rotation
 

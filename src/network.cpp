@@ -67,7 +67,7 @@ static bool parseWeather(const char *body,size_t size,Weather &w){
     " | ENS160: "+(d["has_ens160"].as<bool>()?"online":"offline")+
     " | AS5600: "+(d["has_as5600"].as<bool>()?"online":"offline")+
     " | BH1750: "+(d["has_bh1750"].as<bool>()?"online":"offline");w.firmware=d["fw_version"]|"Unknown";w.uptime=d["uptime"]|"";
-  w.ip=d["ip"]|"";w.ssid=d["ssid"]|"";w.rssi=d["rssi"]|"";w.stationTime=d["time"]|"";
+  w.ip=d["ip"]|"";w.ssid=d["ssid"]|"";w.rssi=d["rssi"].is<int>() ? String(d["rssi"].as<int>()) : String(d["rssi"]|"");w.stationTime=d["time"]|"";
   w.loaded=true;w.received=millis();return true;
 }
 // HTTPClient decodes chunked bodies into this bounded external-RAM sink.
@@ -461,9 +461,10 @@ static bool fetchPrintRoom(const String &url, const String &key, PrintRoom &resu
 static void printRoomTask(void *) {
   uint32_t lastPoll = 0;
   bool wasOpen = false;
+  bool attempted = false;
   for (;;) {
     const bool open = printRoomOpen.load();
-    if (open && (!wasOpen || millis() - lastPoll >= 3000)) {
+    if (!attempted || (open && !wasOpen) || millis() - lastPoll >= (open ? 3000u : 10000u)) {
       lock();
       String url = settings.printRoomUrl;
       String key = settings.printRoomKey;
@@ -484,6 +485,7 @@ static void printRoomTask(void *) {
         unlock();
       }
       lastPoll = millis();
+      attempted = true;
     }
     wasOpen = open;
     vTaskDelay(pdMS_TO_TICKS(200));

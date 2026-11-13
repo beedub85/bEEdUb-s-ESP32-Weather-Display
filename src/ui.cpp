@@ -19,10 +19,11 @@ static String lastCalendarError;
 static lv_obj_t *fields[3],*keyboard,*form,*contentScroller=nullptr;
 static bool renderedWeek=false;
 static Settings draft;
-enum class WeatherPanel { None, Today, Trends, Alerts, PrintRoom };
+enum class WeatherPanel { None, Today, Trends, Alerts, PrintRoom, StationHealth };
 static WeatherPanel weatherPanel = WeatherPanel::None;
 static localWeather::Metric trendMetric = localWeather::Temperature;
 static lv_obj_t *todayStation, *todayEvents, *todayForecast, *todayAccumulation, *alertsBody, *alertsButton;
+static lv_obj_t *stationHealth, *printBanner;
 static lv_obj_t *printPrinter, *printStatus, *printJob, *printPercent, *printBar, *printEta;
 static lv_obj_t *printMetrics[7], *printConnection;
 static lv_obj_t *trendChart, *trendScale, *trendReading;
@@ -214,7 +215,7 @@ static void weatherUpdate(){
   updateLabel(weatherSub[6],(String("eCO2 ")+fmt(w.eco2,0)+" ppm\nTVOC "+fmt(w.tvoc,0)+" ppb").c_str());
   String status;
   if(!snapshot.weatherError.isEmpty())status=snapshot.weatherError;
-  else if(w.loaded)status="Updated "+String((millis()-w.received)/1000)+" sec ago • Tap a card for details";
+  else if(w.loaded)status="Updated "+String((millis()-w.received)/1000)+" sec ago";
   else status="Waiting for weather readings";
   if(w.loaded && millis()-w.received>weatherStaleAfterMs)status="STALE DATA • "+status;
   updateLabel(statusLabel,status.c_str());
@@ -526,6 +527,53 @@ static void openPrintRoom(lv_event_t *) {
   lastTick = millis() - 1000;
 }
 
+static String stationSignal(const Weather &weather) {
+  if (weather.rssi.isEmpty()) return "Unavailable";
+  char *end = nullptr;
+  const long dbm = strtol(weather.rssi.c_str(), &end, 10);
+  if (end != weather.rssi.c_str() && !*end && dbm < 0) return weather.rssi + " dBm";
+  return weather.rssi;
+}
+
+static void updateStationHealth(uint32_t now) {
+  const auto &w = snapshot.weather;
+  String details = "Station Wi-Fi signal: " + stationSignal(w);
+  details += "\nWi-Fi network: " + (w.ssid.isEmpty() ? String("Unavailable") : w.ssid);
+  details += "\nStation IP: " + (w.ip.isEmpty() ? String("Unavailable") : w.ip);
+  details += "\nStation uptime: " + (w.uptime.isEmpty() ? String("Unavailable") : w.uptime);
+  details += "\nLast successful reading: ";
+  details += w.loaded ? String((now - w.received) / 1000) + " sec ago" : String("None since startup");
+  if (w.loaded && now - w.received > weatherStaleAfterMs) details += " (stale)";
+  if (!snapshot.weatherError.isEmpty()) details += "\n" + snapshot.weatherError;
+  details += "\n\n" + (w.sensors.isEmpty() ? String("Sensor status unavailable") : w.sensors);
+  updateLabel(stationHealth, details.c_str());
+}
+
+static void openStationHealth(lv_event_t *) {
+  if (navigation) return;
+  auto *screen = newModal("Station Health");
+  weatherPanel = WeatherPanel::StationHealth;
+  auto *body = box(screen, 20, 70, 760, 365, CARD);
+  stationHealth = label(body, "", 16, 16, 728, &lv_font_montserrat_18);
+  updateStationHealth(millis());
+}
+
+static void updatePrintBanner(const PrintRoom &room, uint32_t now) {
+  String caption;
+  if (room.loaded && room.error.isEmpty() && now - room.received < 20000) {
+    String status = room.status;
+    status.toLowerCase();
+    if (status == "finish" || status == "finished" || status == "complete" || status == "completed")
+      caption = "Print complete";
+    else if (status == "pause" || status == "paused") caption = "Print paused";
+  }
+  if (caption.isEmpty()) lv_obj_add_flag(printBanner, LV_OBJ_FLAG_HIDDEN);
+  else {
+    updateLabel(lv_obj_get_child(printBanner, 0), caption.c_str());
+    lv_obj_clear_flag(printBanner, LV_OBJ_FLAG_HIDDEN);
+  }
+}
+
 static void weatherScreen(){
   const int xs[]={16,360,568,16,212,408,604},ys[]={76,76,76,254,254,254,254},ws[]={328,192,216,180,180,180,180};
   for(int i=0;i<7;++i){
@@ -537,7 +585,12 @@ static void weatherScreen(){
     weatherValues[i]=label(b,"--",i==0?96:16,i==0?46:55,i==0?216:ws[i]-24,i==0?&lv_font_montserrat_48:i==1?&lv_font_montserrat_32:i==2?&lv_font_montserrat_28:&lv_font_montserrat_24);
     weatherSub[i]=label(b,"",16,i<3?112:99,ws[i]-24,&lv_font_montserrat_14,MUTED);
   }
-  statusLabel=label(root,"",20,411,760,&lv_font_montserrat_16,MUTED);
+  auto *health = button(root, "Station Health", 16, 409, 144, 26, openStationHealth, nullptr, CARD);
+  lv_obj_set_style_text_font(lv_obj_get_child(health, 0), &lv_font_montserrat_14, 0);
+  statusLabel=label(root,"",170,413,383,&lv_font_montserrat_14,MUTED);
+  lv_label_set_long_mode(statusLabel, LV_LABEL_LONG_DOT);
+  printBanner = button(root, "", 571, 409, 213, 26, openPrintRoom, nullptr, 0x147C78);
+  lv_obj_add_flag(printBanner, LV_OBJ_FLAG_HIDDEN);
   button(root, "Today at a Glance", 16, 438, 184, 39, openToday, nullptr, CARD);
   button(root, "Weather Trends", 211, 438, 184, 39, openTrends, nullptr, CARD);
   alertsButton = button(root, "Weather Alerts", 406, 438, 184, 39, openAlerts, nullptr, CARD);
@@ -926,7 +979,7 @@ void uiTick(){
   bool trendChanged = false;
   xSemaphoreTake(stateMutex, portMAX_DELAY);
   if (page == WeatherPage) {
-    if (weatherPanel == WeatherPanel::PrintRoom && printRoom.source == settings.printRoomUrl) room = printRoom;
+    if (printRoom.source == settings.printRoomUrl) room = printRoom;
     {
       const bool matches = localForecast.postalCode == settings.postalCode;
       if (matches && (weatherPanel == WeatherPanel::Today || weatherPanel == WeatherPanel::Alerts)) forecast = localForecast;
@@ -989,7 +1042,11 @@ void uiTick(){
   if (weatherPanel == WeatherPanel::PrintRoom) updatePrintRoom(room, now, clock);
   String clockText=clock>1700000000?dateText(clock,"%H:%M"):"--:--";
   clockText+=WiFi.status()==WL_CONNECTED?String("  ")+LV_SYMBOL_WIFI:"  !";updateLabel(clockLabel,clockText.c_str());
-  if(page==WeatherPage)weatherUpdate();
+  if (page == WeatherPage) {
+    weatherUpdate();
+    updatePrintBanner(room, now);
+    if (weatherPanel == WeatherPanel::StationHealth) updateStationHealth(now);
+  }
   if(snapshot.calendarError!=lastCalendarError){calendarDirty=true;lastCalendarError=snapshot.calendarError;}
   if(updateCalendar && (calendarDirty || lastCalendar!=snapshot.calendarReceived || lastMinute!=clock/60 || shownWeek!=core::sunday(clock,requestedWeek))){
     calendarUpdate();lastCalendar=snapshot.calendarReceived;lastMinute=clock/60;

@@ -15,6 +15,7 @@ public:
  bool startsWith(const char*s)const{return rfind(s,0)==0;}
  bool endsWith(const char*s)const {std::string v=s;return size()>=v.size() && compare(size()-v.size(),v.size(),v)==0;}
  void trim(){auto a=find_first_not_of(" \t\r\n");if(a==npos){clear();return;}assign(substr(a,find_last_not_of(" \t\r\n")-a+1));}
+ void toLowerCase(){for(char &c : *this) if(c>='A' && c<='Z') c += 'a'-'A';}
  bool isEmpty()const{return empty();}
 };
 inline String operator+(const String&s,int n){return String(static_cast<const std::string&>(s)+std::to_string(n));}

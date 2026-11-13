@@ -200,6 +200,17 @@ int main(int argc,char**argv){
  printRoom.finishAt = time(nullptr) + 2520;
  printRoom.loaded = true;
  printRoom.received = testMillis;
+ shared.weather.rssi = "-63";
+ ++shared.weather.received;
+ openPanel("Station Health");
+ assert(findLabel(lv_layer_top(), "Station Health"));
+ capture("station-health.ppm");
+ closePanel();
+ printRoom.status = "FINISH";
+ testMillis += 1000;
+ frames();
+ assert(!lv_obj_has_flag(findButton(lv_scr_act(), "Print complete"), LV_OBJ_FLAG_HIDDEN));
+ printRoom.status = "Printing";
  openPanel("Print Room");
  assert(printRoomOpen.load());
  assert(findLabel(lv_layer_top(), LV_SYMBOL_BATTERY_FULL " 74%"));
