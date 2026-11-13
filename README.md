@@ -18,6 +18,10 @@ Set **Settings → Postal code** for the forecast and alerts. Enter your Canadia
 
 Weather data source: [Environment and Climate Change Canada, City Page Weather](https://api.weather.gc.ca/collections/citypageweather-realtime).
 
+### Print Room
+
+Tap **Print Room** on the Weather dashboard for read-only printer progress, status, temperatures, and optional room sensors. Set up the local Home Assistant bridge and enter its address under **Settings → Print Room**. [Print Room setup](docs/PRINT_ROOM_SETUP.md)
+
 ## 1. Build and Upload
 1. Install VS Code and the PlatformIO IDE extension.
 2. Extract the ZIP and open the **weather-display** folder containing `platformio.ini` using PlatformIO → Open Project.

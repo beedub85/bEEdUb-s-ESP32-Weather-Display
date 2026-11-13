@@ -9,6 +9,8 @@
 Settings settings;
 State shared;
 LocalForecast localForecast;
+PrintRoom printRoom;
+std::atomic<bool> printRoomOpen{false};
 localWeather::History weatherHistory;
 SemaphoreHandle_t stateMutex;
 volatile int requestedWeek=0;
@@ -25,6 +27,8 @@ void loadSettings(){
   settings.imperial=p.getBool("imperial",false);settings.brightness=p.getInt("dim",100);
   settings.screenTimeoutSeconds = ScreenIdle::normalizeTimeout(p.getUInt("screenTimeout", ScreenIdle::defaultTimeoutSeconds));
   settings.postalCode = p.getString("postal", "");
+  settings.printRoomUrl = p.getString("printRoom", "");
+  settings.printRoomKey = p.getString("printRoomKey", "");
   p.end();
   setenv("TZ",settings.timezone.c_str(),1);tzset();
 }
@@ -36,6 +40,8 @@ void saveSettings(){
   p.putBool("imperial",c.imperial);p.putInt("dim",c.brightness);
   p.putUInt("screenTimeout", c.screenTimeoutSeconds);
   p.putString("postal", c.postalCode);
+  p.putString("printRoom", c.printRoomUrl);
+  p.putString("printRoomKey", c.printRoomKey);
   p.end();
 }
 class ExternalJsonAllocator:public ArduinoJson::Allocator {
@@ -359,4 +365,75 @@ static void networkTask(void*){
     vTaskDelay(pdMS_TO_TICKS(150));
   }
 }
-void startNetwork(){assert(xTaskCreatePinnedToCore(networkTask,"network",16384,nullptr,1,nullptr,0)==pdPASS);}
+static bool fetchPrintRoom(const String &url, const String &key, PrintRoom &result) {
+  WiFiClient client;
+  HTTPClient http;
+  if (!http.begin(client, url)) return false;
+  http.addHeader("Authorization", String("Bearer ") + key);
+  http.setConnectTimeout(2000);
+  http.setTimeout(2500);
+  http.useHTTP10(true);
+  if (http.GET() != 200 || http.getSize() > 4096) return false;
+  BoundedResponse body(4096);
+  if (http.writeToStream(&body) < 0) return false;
+  JsonDocument data;
+  if (deserializeJson(data, body.data.data(), body.data.size()) ||
+      data["schema"] != 1 || !data["readings"].is<JsonObject>()) return false;
+  JsonObjectConst readings = data["readings"].as<JsonObjectConst>();
+  result.source = url;
+  result.printer = data["printer"] | "Bambu Lab X2D";
+  result.status = readings["status"] | "";
+  result.job = readings["job"] | "";
+  result.stage = readings["stage"] | "";
+  result.progress = number(readings["progress"]);
+  result.remainingMinutes = number(readings["remaining_minutes"]);
+  result.layer = number(readings["layer"]);
+  result.layers = number(readings["layers"]);
+  result.nozzle = number(readings["nozzle"]);
+  result.bed = number(readings["bed"]);
+  result.chamber = number(readings["chamber"]);
+  result.roomTemp = number(readings["room_temp"]);
+  result.humidity = number(readings["humidity"]);
+  result.pm25 = number(readings["pm25"]);
+  result.finishAt = readings["finish_at"] | time_t{0};
+  result.received = millis();
+  result.loaded = true;
+  return true;
+}
+
+static void printRoomTask(void *) {
+  uint32_t lastPoll = 0;
+  bool wasOpen = false;
+  for (;;) {
+    const bool open = printRoomOpen.load();
+    if (open && (!wasOpen || millis() - lastPoll >= 3000)) {
+      lock();
+      String url = settings.printRoomUrl;
+      String key = settings.printRoomKey;
+      unlock();
+      if (validPrintRoomUrl(url) && !url.isEmpty() && validPrintRoomKey(key)) {
+        PrintRoom result;
+        if (WiFi.status() != WL_CONNECTED) result.error = "Wi-Fi disconnected";
+        else if (!fetchPrintRoom(url, key, result)) result.error = "Print Room bridge unavailable";
+        lock();
+        if (url == settings.printRoomUrl && key == settings.printRoomKey) {
+          if (result.loaded) printRoom = std::move(result);
+          else {
+            if (printRoom.source != url) printRoom = PrintRoom{};
+            printRoom.source = url;
+            printRoom.error = result.error;
+          }
+        }
+        unlock();
+      }
+      lastPoll = millis();
+    }
+    wasOpen = open;
+    vTaskDelay(pdMS_TO_TICKS(200));
+  }
+}
+
+void startNetwork() {
+  assert(xTaskCreatePinnedToCore(networkTask, "network", 16384, nullptr, 1, nullptr, 0) == pdPASS);
+  assert(xTaskCreatePinnedToCore(printRoomTask, "printRoom", 8192, nullptr, 1, nullptr, 0) == pdPASS);
+}

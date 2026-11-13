@@ -13,7 +13,7 @@ constexpr uint32_t weatherStaleAfterMs = weatherPollIntervalMs + 30 * 1000;
 struct Settings {
   String ssid, password, station="http://192.168.2.149", calendarUrl, calendarToken;
   String timezone=core::winnipegTimeZone;
-  String postalCode;
+  String postalCode, printRoomUrl, printRoomKey;
   bool imperial=false;
   int brightness=100;
   uint32_t screenTimeoutSeconds = ScreenIdle::defaultTimeoutSeconds;
@@ -49,6 +49,25 @@ struct LocalForecast {
 extern LocalForecast localForecast;
 extern localWeather::History weatherHistory;
 
+struct PrintRoom {
+  String source, printer, status, job, stage, error;
+  float progress = NAN, remainingMinutes = NAN, layer = NAN, layers = NAN;
+  float nozzle = NAN, bed = NAN, chamber = NAN, roomTemp = NAN, humidity = NAN, pm25 = NAN;
+  time_t finishAt = 0;
+  uint32_t received = 0;
+  bool loaded = false;
+};
+extern PrintRoom printRoom;
+extern std::atomic<bool> printRoomOpen;
+inline bool validPrintRoomUrl(const String &url) {
+  return url.isEmpty() || (url.startsWith("http://") && url.endsWith("/status") &&
+      url.length() > 14 && strspn(url.c_str() + 7,
+          "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.-:/") == url.length() - 7);
+}
+
+inline bool validPrintRoomKey(const String &key) {
+  return key.length() == 32 && strspn(key.c_str(), "0123456789abcdefABCDEF") == 32;
+}
 struct State {
   Weather weather;
   core::Events events, todayEvents;

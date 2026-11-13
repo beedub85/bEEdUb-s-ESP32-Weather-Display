@@ -4,14 +4,14 @@
 #include <fstream>
 #include <iostream>
 uint32_t testMillis=10000;
-Settings settings;State shared;LocalForecast localForecast;localWeather::History weatherHistory;SemaphoreHandle_t stateMutex=nullptr;
+Settings settings;State shared;LocalForecast localForecast;PrintRoom printRoom;std::atomic<bool> printRoomOpen{false};localWeather::History weatherHistory;SemaphoreHandle_t stateMutex=nullptr;
 volatile int requestedWeek=0;std::atomic<bool> calendarRefreshRequested{false}, todayOverviewOpen{false};FakeWiFi WiFi;
 void saveSettings(){}void loadSettings(){}void startNetwork(){}
 static lv_color_t fb[800*480],buf[800*32];
 static void flush(lv_disp_drv_t*d,const lv_area_t*a,lv_color_t*p){for(int y=a->y1;y<=a->y2;++y)for(int x=a->x1;x<=a->x2;++x)fb[y*800+x]=*p++;lv_disp_flush_ready(d);}
 static void frames(){for(int i=0;i<5;++i){testMillis+=30;lv_tick_inc(30);uiTick();lv_timer_handler();}}
 static void capture(const char*name){lv_obj_invalidate(lv_scr_act());lv_obj_invalidate(lv_layer_top());testMillis+=1100;lv_tick_inc(1100);frames();std::ofstream f(name,std::ios::binary);f<<"P6\n800 480\n255\n";for(auto c:fb){auto c32=lv_color_to32(c);char rgb[3]={(char)((c32>>16)&255),(char)((c32>>8)&255),(char)(c32&255)};f.write(rgb,3);}}
-static void swipe(bool right){uiTouch(true,400,200);uiTouch(true,right?600:200,200);uiTouch(false,0,0);frames();}
+static void swipe(bool right){uiTouch(true,400,185);uiTouch(true,right?600:200,185);uiTouch(false,0,0);frames();}
 static lv_obj_t *findButton(lv_obj_t*p,const char*text){for(int i=0;i<lv_obj_get_child_cnt(p);++i){auto*c=lv_obj_get_child(p,i);if(lv_obj_check_type(c,&lv_label_class) && std::string(lv_label_get_text(c))==text && lv_obj_check_type(p,&lv_btn_class))return p;auto*r=findButton(c,text);if(r)return r;}return nullptr;}
 static lv_obj_t *findLabel(lv_obj_t*p,const char*text){
  for(int i=0;i<lv_obj_get_child_cnt(p);++i){auto*c=lv_obj_get_child(p,i);if(lv_obj_check_type(c,&lv_label_class) && std::string(lv_label_get_text(c))==text)return c;auto*r=findLabel(c,text);if(r)return r;}return nullptr;
@@ -123,6 +123,7 @@ int main(int argc,char**argv){
  swipe(true);
  auto openPanel = [](const char *name) {
    auto *panel = findButton(lv_scr_act(), name);
+   if (!panel) std::cerr << "Missing dashboard button: " << name << "\n";
    assert(panel);
    lv_event_send(panel, LV_EVENT_CLICKED, nullptr);
    frames();
@@ -153,7 +154,37 @@ int main(int argc,char**argv){
  frames();
  openPanel("Today at a Glance");capture("today-at-a-glance.ppm");closePanel();
  openPanel("Weather Trends");capture("weather-trends.ppm");closePanel();
- openPanel("Active Weather Alerts");capture("weather-alerts.ppm");closePanel();
+ openPanel("Active alerts");capture("weather-alerts.ppm");closePanel();
+ settings.printRoomUrl = "http://192.168.1.10:8787/status";
+ settings.printRoomKey = "0123456789abcdef0123456789abcdef";
+ printRoom.source = settings.printRoomUrl;
+ printRoom.printer = "Bambu Lab X2D";
+ printRoom.status = "Printing";
+ printRoom.job = "Weather display enclosure";
+ printRoom.progress = 68;
+ printRoom.remainingMinutes = 42;
+ printRoom.layer = 142;
+ printRoom.layers = 210;
+ printRoom.nozzle = 225;
+ printRoom.bed = 65;
+ printRoom.chamber = 34;
+ printRoom.roomTemp = 22.4;
+ printRoom.humidity = 41;
+ printRoom.pm25 = 6;
+ printRoom.finishAt = time(nullptr) + 2520;
+ printRoom.loaded = true;
+ printRoom.received = testMillis;
+ openPanel("Print Room");
+ assert(printRoomOpen.load());
+ assert(findLabel(lv_layer_top(), "68%"));
+ capture("print-room.ppm");
+ printRoom.status = "";
+ testMillis += 1000;
+ frames();
+ assert(findLabel(lv_layer_top(), "Offline / unavailable"));
+ assert(findLabel(lv_layer_top(), "41%"));
+ closePanel();
+ assert(!printRoomOpen.load());
  swipe(false);
  auto *postal = findLabel(lv_scr_act(), "Postal code");
  assert(postal);

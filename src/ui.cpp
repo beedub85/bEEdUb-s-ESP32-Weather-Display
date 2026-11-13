@@ -16,10 +16,12 @@ static String lastCalendarError;
 static lv_obj_t *fields[3],*keyboard,*form,*contentScroller=nullptr;
 static bool renderedWeek=false;
 static Settings draft;
-enum class WeatherPanel { None, Today, Trends, Alerts };
+enum class WeatherPanel { None, Today, Trends, Alerts, PrintRoom };
 static WeatherPanel weatherPanel = WeatherPanel::None;
 static localWeather::Metric trendMetric = localWeather::Temperature;
 static lv_obj_t *todayStation, *todayEvents, *todayForecast, *alertsBody, *alertsButton;
+static lv_obj_t *printPrinter, *printStatus, *printJob, *printPercent, *printBar, *printEta;
+static lv_obj_t *printMetrics[7], *printConnection;
 static lv_obj_t *trendChart, *trendScale, *trendReading;
 static lv_point_t trendSegments[localWeather::sampleCount - 1][2];
 static time_t lastTrendSample;
@@ -69,7 +71,7 @@ static String dateText(time_t t,const char*pattern){char b[80];tm d=*localtime(&
 static String temp(float n){return fmt(core::temp(n,settings.imperial))+ (settings.imperial?"°F":"°C");}
 static String speed(float n){return fmt(core::wind(n,settings.imperial),0)+(settings.imperial?" mph":" km/h");}
 static String rain(float n){return fmt(core::rain(n,settings.imperial),settings.imperial?2:1)+(settings.imperial?" in":" mm");}
-static void closeModal(){if(weatherPanel==WeatherPanel::Today)todayOverviewOpen.store(false);weatherPanel=WeatherPanel::None;if(calendarUsbStatus){calendarUsbStatus=nullptr;clearCalendarUsbLine();}if(modal){lv_obj_del(modal);modal=nullptr;lv_obj_invalidate(lv_scr_act());}keyboard=nullptr;}
+static void closeModal(){if(weatherPanel==WeatherPanel::Today)todayOverviewOpen.store(false);if(weatherPanel==WeatherPanel::PrintRoom)printRoomOpen.store(false);weatherPanel=WeatherPanel::None;if(calendarUsbStatus){calendarUsbStatus=nullptr;clearCalendarUsbLine();}if(modal){lv_obj_del(modal);modal=nullptr;lv_obj_invalidate(lv_scr_act());}keyboard=nullptr;}
 static void dismiss(lv_event_t*){closeModal();}
 static lv_obj_t* newModal(const String &title){
   closeModal();modal=box(lv_layer_top(),0,0,800,480,0x07131F,0);
@@ -420,6 +422,77 @@ static void openTrends(lv_event_t *event) {
   lastTick = millis() - 1000;
 }
 
+static void updatePrintRoom(const PrintRoom &room, uint32_t now, time_t clock) {
+  const bool fresh = room.loaded && room.error.isEmpty() && now - room.received < 12000;
+  const bool printerOnline = fresh && !room.status.isEmpty();
+  String connection = "Updates every 3 seconds while this screen is open";
+  if (settings.printRoomUrl.isEmpty()) connection = "Set the bridge address in Settings > Print Room.";
+  else if (!validPrintRoomKey(settings.printRoomKey)) connection = "Enter the bridge access key in Settings > Print Room.";
+  else if (!room.error.isEmpty()) connection = room.error;
+  else if (!fresh) connection = room.loaded ? "Bridge data is stale" : "Connecting to Print Room bridge...";
+  updateLabel(printConnection, connection.c_str());
+  updateLabel(printPrinter, room.printer.isEmpty() ? "Printer" : room.printer.c_str());
+  updateLabel(printStatus, printerOnline ? room.status.c_str() : fresh ? "Offline / unavailable" : "--");
+  updateLabel(printJob, printerOnline && !room.job.isEmpty() ? room.job.c_str() : "--");
+  const bool hasProgress = printerOnline && std::isfinite(room.progress) && room.progress >= 0 && room.progress <= 100;
+  const int percent = hasProgress ? lroundf(room.progress) : 0;
+  updateLabel(printPercent, hasProgress ? (String(percent) + "%").c_str() : "--");
+  lv_bar_set_value(printBar, percent, LV_ANIM_OFF);
+
+  String eta;
+  if (printerOnline && !room.stage.isEmpty()) eta = room.stage;
+  if (printerOnline && std::isfinite(room.remainingMinutes) && room.remainingMinutes > 0)
+    eta += (eta.length() ? String("  |  ") : String("")) + fmt(room.remainingMinutes, 0) + " min left";
+  if (printerOnline && clock > 1700000000 && room.finishAt >= clock)
+    eta += (eta.length() ? String("  |  ") : String("")) + "Finish ~" + dateText(room.finishAt, "%H:%M");
+  updateLabel(printEta, eta.c_str());
+
+  const String readings[] = {
+    printerOnline && std::isfinite(room.layer) ? fmt(room.layer, 0) + " / " + fmt(room.layers, 0) : String("--"),
+    printerOnline && std::isfinite(room.nozzle) ? temp(room.nozzle) : String("--"),
+    printerOnline && std::isfinite(room.bed) ? temp(room.bed) : String("--"),
+    printerOnline && std::isfinite(room.chamber) ? temp(room.chamber) : String("--"),
+    fresh && std::isfinite(room.roomTemp) ? temp(room.roomTemp) : String("--"),
+    fresh && std::isfinite(room.humidity) ? fmt(room.humidity, 0) + "%" : String("--"),
+    fresh && std::isfinite(room.pm25) ? fmt(room.pm25) + " ug/m3" : String("--")
+  };
+  for (unsigned i = 0; i < 7; ++i) updateLabel(printMetrics[i], readings[i].c_str());
+}
+
+static void openPrintRoom(lv_event_t *) {
+  if (navigation) return;
+  auto *screen = newModal("Print Room");
+  weatherPanel = WeatherPanel::PrintRoom;
+  printRoomOpen.store(true);
+  auto *printer = box(screen, 20, 67, 760, 243, CARD);
+  printPrinter = label(printer, "", 20, 15, 430, &lv_font_montserrat_16, MUTED);
+  printStatus = label(printer, "", 465, 15, 275, &lv_font_montserrat_16, TEAL);
+  lv_obj_set_style_text_align(printStatus, LV_TEXT_ALIGN_RIGHT, 0);
+  printJob = label(printer, "", 20, 43, 720, &lv_font_montserrat_24);
+  lv_label_set_long_mode(printJob, LV_LABEL_LONG_DOT);
+  printPercent = label(printer, "", 20, 80, 180, &lv_font_montserrat_48);
+  printEta = label(printer, "", 195, 98, 545, &lv_font_montserrat_16, MUTED);
+  lv_obj_set_style_text_align(printEta, LV_TEXT_ALIGN_RIGHT, 0);
+  lv_label_set_long_mode(printEta, LV_LABEL_LONG_DOT);
+  printBar = lv_bar_create(printer);
+  lv_obj_set_pos(printBar, 20, 149);
+  lv_obj_set_size(printBar, 720, 9);
+  lv_obj_set_style_bg_color(printBar, color(BG), LV_PART_MAIN);
+  lv_obj_set_style_bg_color(printBar, color(TEAL), LV_PART_INDICATOR);
+  const char *metrics[] = {"LAYER", "NOZZLE", "BED", "CHAMBER", "ROOM TEMPERATURE", "ROOM HUMIDITY", "PM2.5"};
+  for (unsigned i = 0; i < 4; ++i) {
+    label(printer, metrics[i], 20 + i * 182, 183, 170, &lv_font_montserrat_12, MUTED);
+    printMetrics[i] = label(printer, "", 20 + i * 182, 201, 170, &lv_font_montserrat_18);
+  }
+  for (unsigned i = 4; i < 7; ++i) {
+    auto *sensor = box(screen, 20 + (i - 4) * 257, 324, 246, 104, CARD);
+    label(sensor, metrics[i], 16, 12, 210, &lv_font_montserrat_14, MUTED);
+    printMetrics[i] = label(sensor, "", 16, 42, 210, &lv_font_montserrat_28);
+  }
+  printConnection = label(screen, "", 22, 446, 750, &lv_font_montserrat_14, MUTED);
+  lastTick = millis() - 1000;
+}
+
 static void weatherScreen(){
   const int xs[]={16,360,568,16,212,408,604},ys[]={76,76,76,254,254,254,254},ws[]={328,192,216,180,180,180,180};
   for(int i=0;i<7;++i){
@@ -432,9 +505,10 @@ static void weatherScreen(){
     weatherSub[i]=label(b,"",16,i<3?112:99,ws[i]-24,&lv_font_montserrat_14,MUTED);
   }
   statusLabel=label(root,"",20,411,760,&lv_font_montserrat_16,MUTED);
-  button(root, "Today at a Glance", 16, 438, 246, 39, openToday, nullptr, CARD);
-  button(root, "Weather Trends", 277, 438, 246, 39, openTrends, nullptr, CARD);
-  alertsButton = button(root, "Weather Alerts", 538, 438, 246, 39, openAlerts, nullptr, CARD);
+  button(root, "Today at a Glance", 16, 438, 184, 39, openToday, nullptr, CARD);
+  button(root, "Weather Trends", 211, 438, 184, 39, openTrends, nullptr, CARD);
+  alertsButton = button(root, "Weather Alerts", 406, 438, 184, 39, openAlerts, nullptr, CARD);
+  button(root, "Print Room", 601, 438, 183, 39, openPrintRoom, nullptr, CARD);
   alertBanner = false;
   weatherUpdate();
 }
@@ -450,6 +524,7 @@ static lv_obj_t *input(lv_obj_t*p,const char*name,const String&value,int y,bool 
 }
 static void applyEditorSettings() {
   xSemaphoreTake(stateMutex,portMAX_DELAY);settings=draft;
+  if(editKind==5) printRoom = PrintRoom{};
   if(editKind==2 || editKind==3){shared.events.clear();shared.todayEvents.clear();shared.todayWeek=0;shared.calendarLoaded=false;shared.calendarError="Loading calendar...";}
   if(editKind==1){shared.weather=Weather();shared.weatherError="Connecting to station...";}
   xSemaphoreGive(stateMutex);saveSettings();
@@ -529,6 +604,20 @@ static void editorSave(lv_event_t*){
     }
     draft.postalCode = prefix;
   }
+  if (editKind == 5) {
+    draft.printRoomUrl = value(0);
+    draft.printRoomUrl.trim();
+    draft.printRoomKey = value(1);
+    draft.printRoomKey.trim();
+    if (draft.printRoomUrl.isEmpty()) draft.printRoomKey = "";
+    if (!validPrintRoomUrl(draft.printRoomUrl) ||
+        (!draft.printRoomUrl.isEmpty() && !validPrintRoomKey(draft.printRoomKey))) {
+      auto *msg = lv_msgbox_create(modal, "Check bridge address",
+          "Enter an http:// LAN address ending in /status and a 32-character hex access key.", nullptr, true);
+      lv_obj_center(msg);
+      return;
+    }
+  }
   if((editKind==0 && (draft.ssid.length()>32 || draft.password.length()>63)) ||
      (editKind==1 && !draft.station.startsWith("http://")) ||
      (editKind==2 && draft.calendarUrl.length() && (!draft.calendarUrl.startsWith("https://script.google.com/macros/s/") || !draft.calendarUrl.endsWith("/exec") || draft.calendarToken.length()<32)) ||
@@ -551,7 +640,7 @@ static void edit(lv_event_t *e){
     for(int i=0;i<9;++i)button(list,tzNames[i],12,i*58,720,48,timezoneSelect,(void*)(intptr_t)i,settings.timezone==tzCodes[i]?0x147C78:CARD);
     lv_obj_invalidate(modal);return;
   }
-  const char*titles[]={"Wi-Fi setup","Weather station address","Google Calendar setup","Time zone (POSIX)","Postal code"};
+  const char*titles[]={"Wi-Fi setup","Weather station address","Google Calendar setup","Time zone (POSIX)","Postal code","Print Room bridge"};
   auto*m=newModal(titles[editKind]);button(m,"Save",570,10,96,44,editorSave);
   if(editKind==2)button(m,"Set up over USB",396,10,158,44,startCalendarUsb,nullptr,CARD);
   form=box(m,24,72,752,164,CARD);lv_obj_add_flag(form,LV_OBJ_FLAG_SCROLLABLE);lv_obj_set_scroll_dir(form,LV_DIR_VER);
@@ -563,6 +652,11 @@ static void edit(lv_event_t *e){
   if (editKind == 4) {
     fields[0] = input(form, "Canadian postal code (first three characters are enough)", draft.postalCode, 8, false, 10);
     label(form, "Leave blank to clear the location.", 12, 90, 700, &lv_font_montserrat_14, MUTED);
+  }
+  if (editKind == 5) {
+    fields[0] = input(form, "Bridge URL, for example http://192.168.1.10:8787/status",
+                      draft.printRoomUrl, 8, false, 160);
+    fields[1] = input(form, "Bridge access key (32 hex characters)", draft.printRoomKey, 92, true, 32);
   }
   lv_keyboard_set_textarea(keyboard,fields[0]);lv_obj_invalidate(modal);
 }
@@ -603,16 +697,15 @@ static void openScreenTimeout(lv_event_t *) {
 }
 
 static void settingsScreen(){
-  const char*names[]={"Wi-Fi","Weather station","Google Calendar","Display dimming","Imperial units","Time zone","Screen timeout","Postal code"};
-  String values[]={settings.ssid.isEmpty()?"Tap to connect":settings.ssid,settings.station,settings.calendarUrl.isEmpty()?"Tap to link":"Configured", "", "°F / mph / in", timezoneName(), screenTimeoutLabel(settings.screenTimeoutSeconds), settings.postalCode.isEmpty() ? "Tap to set location" : settings.postalCode};
-  int kinds[]={0,1,2,-1,-1,3,-1,4};
-  for(int i=0;i<8;++i){auto*b=box(root,20,62+i*47,760,43,CARD);
+  const char*names[]={"Wi-Fi","Weather station","Google Calendar","Display dimming","Imperial units","Time zone","Screen timeout","Postal code","Print Room"};
+  String values[]={settings.ssid.isEmpty()?"Tap to connect":settings.ssid,settings.station,settings.calendarUrl.isEmpty()?"Tap to link":"Configured", "", "°F / mph / in", timezoneName(), screenTimeoutLabel(settings.screenTimeoutSeconds), settings.postalCode.isEmpty() ? "Tap to set location" : settings.postalCode, settings.printRoomUrl.isEmpty() ? "Tap to set bridge" : settings.printRoomUrl};
+  int kinds[]={0,1,2,-1,-1,3,-1,4,5};
+  for(int i=0;i<9;++i){auto*b=box(root,20,61+i*45,760,41,CARD);
     label(b,names[i],16,11,220,&lv_font_montserrat_18);
     if(i==3){auto*s=lv_slider_create(b);lv_obj_set_pos(s,300,20);lv_obj_set_size(s,416,10);lv_slider_set_range(s,20,100);lv_slider_set_value(s,settings.brightness,LV_ANIM_OFF);lv_obj_add_event_cb(s,brightnessChanged,LV_EVENT_VALUE_CHANGED,nullptr);lv_obj_add_event_cb(s,brightnessChanged,LV_EVENT_RELEASED,nullptr);}
     else if(i==4){label(b,values[i],300,15,320,&lv_font_montserrat_14,MUTED);auto*s=lv_switch_create(b);lv_obj_set_pos(s,680,7);lv_obj_set_size(s,60,30);if(settings.imperial)lv_obj_add_state(s,LV_STATE_CHECKED);lv_obj_add_event_cb(s,unitsChanged,LV_EVENT_VALUE_CHANGED,nullptr);}
     else{auto*l=label(b,values[i]+"  >",250,16,490,&lv_font_montserrat_14,TEAL);lv_label_set_long_mode(l,LV_LABEL_LONG_DOT);lv_obj_add_flag(b,LV_OBJ_FLAG_CLICKABLE);lv_obj_add_event_cb(b,i==6?openScreenTimeout:edit,LV_EVENT_CLICKED,(void*)(intptr_t)kinds[i]);}
   }
-  label(root,"Swipe right to return to Weather • Dimming changes image intensity",24,450,750,&lv_font_montserrat_12,MUTED);
 }
 static void viewChange(lv_event_t *e){
   if(navigation)return;
@@ -740,7 +833,7 @@ void uiTouch(bool pressed,int x,int y){
   static int sx=0,sy=0,ex=0,ey=0;static uint32_t at=0;
   if(pressed){if(!touchDown){sx=x;sy=y;at=millis();touchDown=true;}ex=x;ey=y;}
   else if(touchDown){touchDown=false;int dx=ex-sx,dy=ey-sy;
-    bool editing=modal || (page==2 && sy>=203 && sy<246);
+    bool editing=modal || (page==2 && sy>=196 && sy<237);
     if(!editing && millis()-at<1200 && abs(dx)>=100 && abs(dx)>abs(dy)*1.6f){int next=page+(dx>0?-1:1);if(next>=0 && next<=2)navigation=dx>0?-1:1;}
   }
 }
@@ -756,10 +849,12 @@ void uiTick(){
     (!contentScroller || !lv_obj_is_scrolling(contentScroller));
   const time_t clock = time(nullptr);
   LocalForecast forecast;
+  PrintRoom room;
   String todayAgenda;
   bool trendChanged = false;
   xSemaphoreTake(stateMutex, portMAX_DELAY);
   if (page == 1) {
+    if (weatherPanel == WeatherPanel::PrintRoom && printRoom.source == settings.printRoomUrl) room = printRoom;
     {
       const bool matches = localForecast.postalCode == settings.postalCode;
       if (matches && (weatherPanel == WeatherPanel::Today || weatherPanel == WeatherPanel::Alerts)) forecast = localForecast;
@@ -769,7 +864,7 @@ void uiTick(){
       if (hasAlerts != alertBanner) {
         alertBanner = hasAlerts;
         lv_obj_set_style_bg_color(alertsButton, color(hasAlerts ? 0x9A491E : CARD), 0);
-        updateLabel(lv_obj_get_child(alertsButton, 0), hasAlerts ? "Active Weather Alerts" : "Weather Alerts");
+        updateLabel(lv_obj_get_child(alertsButton, 0), hasAlerts ? "Active alerts" : "Weather Alerts");
       }
     }
     if (weatherPanel == WeatherPanel::Today) {
@@ -819,6 +914,7 @@ void uiTick(){
   if (weatherPanel == WeatherPanel::Today) updateToday(forecast, todayAgenda, clock);
   if (weatherPanel == WeatherPanel::Alerts) updateAlerts(forecast, clock);
   if (trendChanged) drawTrend();
+  if (weatherPanel == WeatherPanel::PrintRoom) updatePrintRoom(room, now, clock);
   String clockText=clock>1700000000?dateText(clock,"%H:%M"):"--:--";
   clockText+=WiFi.status()==WL_CONNECTED?String("  ")+LV_SYMBOL_WIFI:"  !";updateLabel(clockLabel,clockText.c_str());
   if(page==1)weatherUpdate();

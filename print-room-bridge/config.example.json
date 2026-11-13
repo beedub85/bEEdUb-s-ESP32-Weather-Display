@@ -1,0 +1,19 @@
+{
+  "home_assistant": "http://127.0.0.1:8123",
+  "printer": "Bambu Lab X2D",
+  "entities": {
+    "status": "sensor.x2d_print_status",
+    "job": "sensor.x2d_task_name",
+    "stage": "sensor.x2d_current_stage",
+    "progress": "sensor.x2d_print_progress",
+    "remaining_minutes": "sensor.x2d_remaining_time",
+    "finish_at": "sensor.x2d_end_time",
+    "layer": "sensor.x2d_current_layer",
+    "layers": "sensor.x2d_total_layer_count",
+    "nozzle": "sensor.x2d_nozzle_temperature",
+    "bed": "sensor.x2d_bed_temperature",
+    "room_temp": "sensor.print_room_temperature",
+    "humidity": "sensor.print_room_humidity",
+    "pm25": "sensor.print_room_pm25"
+  }
+}
