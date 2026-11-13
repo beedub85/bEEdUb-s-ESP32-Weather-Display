@@ -9,7 +9,7 @@ WEATHER DISPLAY — FIRST HARDWARE-TEST RELEASE
 All settings are entered on the touchscreen. No configuration file is required.
 
 Weather is the startup screen.
-Swipe RIGHT -> Calendar. Swipe LEFT -> Settings. Swipe back to return.
+Swipe RIGHT -> Settings. Swipe LEFT -> Calendar. Swipe back to return.
 There are no page navigation buttons.
 
 Your existing weather station firmware does not need to be changed.

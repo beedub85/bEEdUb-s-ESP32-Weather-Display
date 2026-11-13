@@ -8,7 +8,8 @@ static lv_obj_t *root,*clockLabel,*statusLabel,*calendarBody,*calendarDate,*moda
 static lv_obj_t *weatherValues[7],*weatherSub[7],*weatherImages[7],*conditionLabel;
 static icons::State iconStates[7];
 static State snapshot;
-static int page=1; // Calendar=0, Weather=1, Settings=2.
+enum Page { SettingsPage, WeatherPage, CalendarPage };
+static int page=WeatherPage;
 static bool weekView=false,redraw=false,calendarDirty=true;
 static bool touchDown = false;
 static int navigation=0,editKind=0;
@@ -65,7 +66,7 @@ static lv_obj_t* label(lv_obj_t*p,const String&s,int x,int y,int w,const lv_font
 static void updateBatteryLabel(lv_obj_t *indicator) {
   if (!indicator) return;
   const String caption = String(LV_SYMBOL_BATTERY_FULL) + " " +
-      (batteryPercent < 0 ? String("--%") : String(batteryPercent) + "%");
+      (batteryPercent < 0 ? String("N/C") : String(batteryPercent) + "%");
   updateLabel(indicator, caption.c_str());
 }
 
@@ -722,14 +723,34 @@ static void openScreenTimeout(lv_event_t *) {
   }
 }
 
+static void rotationChanged(lv_event_t *event) {
+  const bool enabled = lv_obj_has_state(lv_event_get_target(event), LV_STATE_CHECKED);
+  xSemaphoreTake(stateMutex, portMAX_DELAY);
+  settings.rotateScreen = enabled;
+  xSemaphoreGive(stateMutex);
+
+  lv_obj_invalidate(lv_scr_act());
+}
+
+static constexpr int settingsTop = 61;
+static constexpr int settingsRowPitch = 41;
+static constexpr int settingsRowHeight = 38;
+static constexpr int dimmingTop = settingsTop + 3 * settingsRowPitch;
+
 static void settingsScreen(){
-  const char*names[]={"Wi-Fi","Weather station","Google Calendar","Display dimming","Imperial units","Time zone","Screen timeout","Postal code","Print Room"};
-  String values[]={settings.ssid.isEmpty()?"Tap to connect":settings.ssid,settings.station,settings.calendarUrl.isEmpty()?"Tap to link":"Configured", "", "°F / mph / in", timezoneName(), screenTimeoutLabel(settings.screenTimeoutSeconds), settings.postalCode.isEmpty() ? "Tap to set location" : settings.postalCode, settings.printRoomUrl.isEmpty() ? "Tap to set bridge" : settings.printRoomUrl};
-  int kinds[]={0,1,2,-1,-1,3,-1,4,5};
-  for(int i=0;i<9;++i){auto*b=box(root,20,61+i*45,760,41,CARD);
+  const char*names[]={"Wi-Fi","Weather station","Google Calendar","Display dimming","Imperial units","Time zone","Screen timeout","Postal code","Print Room","Rotate screen 180°"};
+  String values[]={settings.ssid.isEmpty()?"Tap to connect":settings.ssid,settings.station,settings.calendarUrl.isEmpty()?"Tap to link":"Configured", "", "°F / mph / in", timezoneName(), screenTimeoutLabel(settings.screenTimeoutSeconds), settings.postalCode.isEmpty() ? "Tap to set location" : settings.postalCode, settings.printRoomUrl.isEmpty() ? "Tap to set bridge" : settings.printRoomUrl, ""};
+  int kinds[]={0,1,2,-1,-1,3,-1,4,5,-1};
+  for(int i=0;i<10;++i){auto*b=box(root,20,settingsTop+i*settingsRowPitch,760,settingsRowHeight,CARD);
     label(b,names[i],16,11,220,&lv_font_montserrat_18);
     if(i==3){auto*s=lv_slider_create(b);lv_obj_set_pos(s,300,20);lv_obj_set_size(s,416,10);lv_slider_set_range(s,20,100);lv_slider_set_value(s,settings.brightness,LV_ANIM_OFF);lv_obj_add_event_cb(s,brightnessChanged,LV_EVENT_VALUE_CHANGED,nullptr);lv_obj_add_event_cb(s,brightnessChanged,LV_EVENT_RELEASED,nullptr);}
-    else if(i==4){label(b,values[i],300,15,320,&lv_font_montserrat_14,MUTED);auto*s=lv_switch_create(b);lv_obj_set_pos(s,680,7);lv_obj_set_size(s,60,30);if(settings.imperial)lv_obj_add_state(s,LV_STATE_CHECKED);lv_obj_add_event_cb(s,unitsChanged,LV_EVENT_VALUE_CHANGED,nullptr);}
+    else if(i==4 || i==9){
+      if(i==4) label(b,values[i],300,11,320,&lv_font_montserrat_14,MUTED);
+      auto *toggle = lv_switch_create(b);
+      lv_obj_set_pos(toggle,680,4);lv_obj_set_size(toggle,60,30);
+      if(i==4 ? settings.imperial : settings.rotateScreen) lv_obj_add_state(toggle,LV_STATE_CHECKED);
+      lv_obj_add_event_cb(toggle,i==4?unitsChanged:rotationChanged,LV_EVENT_VALUE_CHANGED,nullptr);
+    }
     else{auto*l=label(b,values[i]+"  >",250,16,490,&lv_font_montserrat_14,TEAL);lv_label_set_long_mode(l,LV_LABEL_LONG_DOT);lv_obj_add_flag(b,LV_OBJ_FLAG_CLICKABLE);lv_obj_add_event_cb(b,i==6?openScreenTimeout:edit,LV_EVENT_CLICKED,(void*)(intptr_t)kinds[i]);}
   }
 }
@@ -822,13 +843,13 @@ static void calendarUpdate(){
   bool matches=snapshot.calendarLoaded && snapshot.calendarWeek==want;
   String status;
   if(now<1700000000){label(calendarBody,"Waiting for time sync",24,60,740,&lv_font_montserrat_24,INK);status="Connect Wi-Fi to set the clock";}
-  else if(!matches){label(calendarBody,snapshot.calendarError.isEmpty()?"Waiting for next sync. Tap Refresh to load this week now.":snapshot.calendarError,24,60,740,&lv_font_montserrat_20,INK);status="Swipe left to return to Weather";}
+  else if(!matches){label(calendarBody,snapshot.calendarError.isEmpty()?"Waiting for next sync. Tap Refresh to load this week now.":snapshot.calendarError,24,60,740,&lv_font_montserrat_20,INK);status="Swipe right to return to Weather";}
   else{
     if(weekView)week();else {lv_label_set_text(calendarDate,"");agenda();}
     status=(snapshot.calendarError.isEmpty()?String("Updated ")+String((millis()-snapshot.calendarReceived)/60000)+" min ago":String("STALE • ")+snapshot.calendarError);
     if(snapshot.calendarError.isEmpty() && millis()-snapshot.calendarReceived>600000)status="STALE • "+status;
     if(snapshot.truncated)status+=" • Showing first 100 events";
-    status+=" • Swipe left for Weather";
+    status+=" • Swipe right for Weather";
   }
   if(preserve && contentScroller)lv_obj_scroll_to_y(contentScroller,scroll,LV_ANIM_OFF);
   renderedWeek=weekView;
@@ -836,13 +857,13 @@ static void calendarUpdate(){
 }
 static void build(){
   contentScroller=nullptr;
-  root=lv_obj_create(nullptr);lv_obj_set_style_bg_color(root,color(page==0?0xFFFFFF:BG),0);lv_obj_set_style_pad_all(root,0,0);lv_obj_set_style_border_width(root,0,0);lv_obj_clear_flag(root,LV_OBJ_FLAG_SCROLLABLE);
-  label(root,page==0?"Calendar":page==1?"Weather":"Settings",22,16,540,&lv_font_montserrat_28,page==0?INK:TEXT);
-  clockLabel=label(root,"--:--",555,20,123,&lv_font_montserrat_20,page==0?INK:TEXT);
-  batteryLabel = batteryIndicator(root, 680, page==0?INK:MUTED);
-  if(page==0)calendarScreen();else if(page==1)weatherScreen();else settingsScreen();
+  root=lv_obj_create(nullptr);lv_obj_set_style_bg_color(root,color(page==CalendarPage?0xFFFFFF:BG),0);lv_obj_set_style_pad_all(root,0,0);lv_obj_set_style_border_width(root,0,0);lv_obj_clear_flag(root,LV_OBJ_FLAG_SCROLLABLE);
+  label(root,page==CalendarPage?"Calendar":page==WeatherPage?"Weather":"Settings",22,16,540,&lv_font_montserrat_28,page==CalendarPage?INK:TEXT);
+  clockLabel=label(root,"--:--",555,20,123,&lv_font_montserrat_20,page==CalendarPage?INK:TEXT);
+  batteryLabel = batteryIndicator(root, 680, page==CalendarPage?INK:MUTED);
+  if(page==CalendarPage)calendarScreen();else if(page==WeatherPage)weatherScreen();else settingsScreen();
   lv_obj_t*old=lv_scr_act();lv_scr_load(root);if(old!=root)lv_obj_del(old);
-  redraw=false;lastMinute=0;calendarBody=page==0?calendarBody:nullptr;
+  redraw=false;lastMinute=0;calendarBody=page==CalendarPage?calendarBody:nullptr;
 }
 void uiSetDimming(int percent) {
   if (!dimmer) return;
@@ -856,13 +877,29 @@ void uiSetDimming(int percent) {
 void uiBegin(){
   build();dimmer=box(lv_layer_sys(),0,0,800,480,0x000000,0);lv_obj_clear_flag(dimmer,LV_OBJ_FLAG_CLICKABLE);uiSetDimming(settings.brightness);
 }
-void uiTouch(bool pressed,int x,int y){
-  static int sx=0,sy=0,ex=0,ey=0;static uint32_t at=0;
-  if(pressed){if(!touchDown){sx=x;sy=y;at=millis();touchDown=true;}ex=x;ey=y;}
-  else if(touchDown){touchDown=false;int dx=ex-sx,dy=ey-sy;
-    bool editing=modal || (page==2 && sy>=196 && sy<237);
-    if(!editing && millis()-at<1200 && abs(dx)>=100 && abs(dx)>abs(dy)*1.6f){int next=page+(dx>0?-1:1);if(next>=0 && next<=2)navigation=dx>0?-1:1;}
+bool uiTouch(bool pressed, int x, int y) {
+  static int startX, startY, endX, endY;
+  if (pressed) {
+    if (!touchDown) {
+      startX = x;
+      startY = y;
+      touchDown = true;
+    }
+    endX = x;
+    endY = y;
+    return false;
   }
+  if (!touchDown) return false;
+  touchDown = false;
+  const bool dimming = page == SettingsPage && startY >= dimmingTop &&
+                       startY < dimmingTop + settingsRowHeight;
+  const int dx = endX - startX, dy = endY - startY;
+  if (modal || dimming || abs(dx) < 100 || abs(dx) <= abs(dy) * 1.6f) return false;
+
+  const int direction = dx > 0 ? -1 : 1;
+  const int next = page + direction;
+  if (next >= SettingsPage && next <= CalendarPage) navigation = direction;
+  return true; // Suppress the click even when there is no adjacent page.
 }
 void uiTick(){
   if(navigation){page+=navigation;navigation=0;redraw=true;}
@@ -872,7 +909,7 @@ void uiTick(){
   if (!rebuilt && now - lastTick < 1000) return;
   lastTick = now;
 
-  const bool updateCalendar = page == 0 && !modal && !touchDown &&
+  const bool updateCalendar = page == CalendarPage && !modal && !touchDown &&
     (!contentScroller || !lv_obj_is_scrolling(contentScroller));
   const time_t clock = time(nullptr);
   LocalForecast forecast;
@@ -880,7 +917,7 @@ void uiTick(){
   String todayAgenda;
   bool trendChanged = false;
   xSemaphoreTake(stateMutex, portMAX_DELAY);
-  if (page == 1) {
+  if (page == WeatherPage) {
     if (weatherPanel == WeatherPanel::PrintRoom && printRoom.source == settings.printRoomUrl) room = printRoom;
     {
       const bool matches = localForecast.postalCode == settings.postalCode;
@@ -944,7 +981,7 @@ void uiTick(){
   if (weatherPanel == WeatherPanel::PrintRoom) updatePrintRoom(room, now, clock);
   String clockText=clock>1700000000?dateText(clock,"%H:%M"):"--:--";
   clockText+=WiFi.status()==WL_CONNECTED?String("  ")+LV_SYMBOL_WIFI:"  !";updateLabel(clockLabel,clockText.c_str());
-  if(page==1)weatherUpdate();
+  if(page==WeatherPage)weatherUpdate();
   if(snapshot.calendarError!=lastCalendarError){calendarDirty=true;lastCalendarError=snapshot.calendarError;}
   if(updateCalendar && (calendarDirty || lastCalendar!=snapshot.calendarReceived || lastMinute!=clock/60 || shownWeek!=core::sunday(clock,requestedWeek))){
     calendarUpdate();lastCalendar=snapshot.calendarReceived;lastMinute=clock/60;

@@ -42,14 +42,14 @@ Flash the updated firmware with **Set up over USB** in the Google Calendar setti
    ```
 
 3. Paste the deployed **Web app URL** at the first prompt and press Enter. Paste only the **Display token** at the second prompt and press Enter. PowerShell masks the token.
-4. When the helper prompts you, swipe left from Weather on the display and tap **Google Calendar → Set up over USB**. Press Enter on the PC within two minutes. Use **Close** on the display to cancel.
-5. Wait for **Calendar settings saved on the display**. The helper transfers the URL and token over the cable and the display saves them for future boots. Swipe right from Weather to see Calendar after Wi-Fi and internet time sync. Use the refresh icon to retry manually.
+4. When the helper prompts you, swipe right from Weather on the display and tap **Google Calendar → Set up over USB**. Press Enter on the PC within two minutes. Use **Close** on the display to cancel.
+5. Wait for **Calendar settings saved on the display**. The helper transfers the URL and token over the cable and the display saves them for future boots. Swipe left from Weather to see Calendar after Wi-Fi and internet time sync. Use the refresh icon to retry manually.
 
 The USB helper configures the display only. Set `CALENDAR_IDS` under **Project Settings → Script Properties** in Apps Script as described above.
 
 ## Enter the URL and token on the touchscreen
 
-Swipe left from Weather and tap **Google Calendar**. Enter the URL and token in their separate fields, then tap **Save**. Scroll the form to reach the token field. Swipe back to Weather, then right to Calendar.
+Swipe right from Weather and tap **Google Calendar**. Enter the URL and token in their separate fields, then tap **Save**. Scroll the form to reach the token field. Swipe back to Weather, then left to Calendar.
 
 
 The token is a bearer secret: anyone who obtains both it and the endpoint can read the selected event fields. Keep it private, do not post a token-bearing URL, and do not paste it into this conversation. It is sent in an HTTPS query because Apps Script's standard `doGet` interface provides query parameters rather than arbitrary request headers. The bridge checks the token before making any Calendar API calls and never logs request URLs or event data. The script does not grant unauthenticated callers your Google OAuth token.

@@ -290,7 +290,7 @@ static void networkTask(void*){
     }
     if(WiFi.status()!=WL_CONNECTED){
       wasConnected=false;
-      lock();if(localForecast.postalCode==c.postalCode)localForecast.error="Wi-Fi disconnected";shared.weatherError=c.ssid.isEmpty()?"Swipe left to set up Wi-Fi":"Connecting to Wi-Fi...";if(shared.calendarLoaded)shared.calendarError="Wi-Fi disconnected";unlock();
+      lock();if(localForecast.postalCode==c.postalCode)localForecast.error="Wi-Fi disconnected";shared.weatherError=c.ssid.isEmpty()?"Swipe right to set up Wi-Fi":"Connecting to Wi-Fi...";if(shared.calendarLoaded)shared.calendarError="Wi-Fi disconnected";unlock();
       if(c.ssid.length() && millis()-lastReconnect>20000){WiFi.reconnect();lastReconnect=millis();}
       vTaskDelay(pdMS_TO_TICKS(300));continue;
     }

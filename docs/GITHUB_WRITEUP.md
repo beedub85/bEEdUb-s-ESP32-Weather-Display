@@ -10,7 +10,7 @@ Swipe-controlled weather and Google Calendar touchscreen for the Waveshare ESP32
 
 ## Project overview
 
-ESP32 Weather Display turns a Waveshare ESP32-S3 7-inch touchscreen into a dedicated wireless weather and calendar dashboard. It boots directly into a set of weather cards showing readings from an existing ESP32 weather station. Swipe right to open Google Calendar, or swipe left to open Settings.
+ESP32 Weather Display turns a Waveshare ESP32-S3 7-inch touchscreen into a dedicated wireless weather and calendar dashboard. It boots directly into a set of weather cards showing readings from an existing ESP32 weather station. Swipe left to open Google Calendar, or swipe right to open Settings.
 
 The weather dashboard groups temperature, humidity, wind, pressure, rainfall, light, and ENS160 air-quality readings into readable cards. Tapping a card opens the available sensor details and station diagnostics. The display reads the station's existing `/api/status` endpoint, so the station firmware can stay as it is.
 

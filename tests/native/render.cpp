@@ -11,7 +11,7 @@ static lv_color_t fb[800*480],buf[800*32];
 static void flush(lv_disp_drv_t*d,const lv_area_t*a,lv_color_t*p){for(int y=a->y1;y<=a->y2;++y)for(int x=a->x1;x<=a->x2;++x)fb[y*800+x]=*p++;lv_disp_flush_ready(d);}
 static void frames(){for(int i=0;i<5;++i){testMillis+=30;lv_tick_inc(30);uiTick();lv_timer_handler();}}
 static void capture(const char*name){lv_obj_invalidate(lv_scr_act());lv_obj_invalidate(lv_layer_top());testMillis+=1100;lv_tick_inc(1100);frames();std::ofstream f(name,std::ios::binary);f<<"P6\n800 480\n255\n";for(auto c:fb){auto c32=lv_color_to32(c);char rgb[3]={(char)((c32>>16)&255),(char)((c32>>8)&255),(char)(c32&255)};f.write(rgb,3);}}
-static void swipe(bool right){uiTouch(true,400,185);uiTouch(true,right?600:200,185);uiTouch(false,0,0);frames();}
+static void swipe(bool right){uiTouch(true,400,170);uiTouch(true,right?600:200,170);uiTouch(false,0,0);frames();}
 static lv_obj_t *findButton(lv_obj_t*p,const char*text){for(int i=0;i<lv_obj_get_child_cnt(p);++i){auto*c=lv_obj_get_child(p,i);if(lv_obj_check_type(c,&lv_label_class) && std::string(lv_label_get_text(c))==text && lv_obj_check_type(p,&lv_btn_class))return p;auto*r=findButton(c,text);if(r)return r;}return nullptr;}
 static lv_obj_t *findLabel(lv_obj_t*p,const char*text){
  for(int i=0;i<lv_obj_get_child_cnt(p);++i){auto*c=lv_obj_get_child(p,i);if(lv_obj_check_type(c,&lv_label_class) && std::string(lv_label_get_text(c))==text)return c;auto*r=findLabel(c,text);if(r)return r;}return nullptr;
@@ -26,7 +26,7 @@ int main(int argc,char**argv){
  for(int i=0;i<5;++i){core::Event e;e.title=i%2?"Project planning":"Team meeting";e.location="Office";e.calendar="Personal";e.start=day+9*3600+i*90*60;e.end=e.start+3600;e.color=i%2?0x34A853:0x4285F4;shared.events.push_back(e);}
  core::Event all;all.title="All-day reminder";all.allDay=true;char dates[16];tm t=*localtime(&day);strftime(dates,16,"%Y-%m-%d",&t);all.startDate=dates;day=core::addDays(day,1);t=*localtime(&day);strftime(dates,16,"%Y-%m-%d",&t);all.endDate=dates;shared.events.push_back(all);
  uiBegin();frames();
- assert(findLabel(lv_scr_act(), LV_SYMBOL_BATTERY_FULL " --%"));
+ assert(findLabel(lv_scr_act(), LV_SYMBOL_BATTERY_FULL " N/C"));
  uiSetBatteryPercent(74);
  assert(findLabel(lv_scr_act(), LV_SYMBOL_BATTERY_FULL " 74%"));
  capture("weather.ppm");
@@ -60,7 +60,7 @@ int main(int argc,char**argv){
    assert(findLabel(lv_scr_act(),c.caption));capture(c.file);
  }
  w.lux=8420;w.raining=true;w.received=testMillis;testMillis+=weatherStaleAfterMs+1;lv_tick_inc(weatherStaleAfterMs+1);frames();assert(findLabel(lv_scr_act(),"Sky unavailable"));
- w.received=testMillis;testMillis+=1100;lv_tick_inc(1100);frames();swipe(true);capture("calendar-today.ppm");
+ w.received=testMillis;testMillis+=1100;lv_tick_inc(1100);frames();swipe(false);capture("calendar-today.ppm");
  auto*weekButton=findButton(lv_scr_act(),"Week");assert(weekButton);lv_event_send(weekButton,LV_EVENT_CLICKED,nullptr);frames();capture("calendar-week.ppm");
  assert(!calendarRefreshRequested.load());
  auto *refreshButton = findButton(lv_scr_act(), LV_SYMBOL_REFRESH);
@@ -72,10 +72,28 @@ int main(int argc,char**argv){
  testMillis+=61000;lv_tick_inc(61000);frames();
  hour=findLabel(lv_scr_act(),"09:00");assert(hour);
  assert(lv_obj_get_scroll_y(lv_obj_get_parent(lv_obj_get_parent(hour)))==14*54);
- swipe(false);swipe(false);capture("settings.ppm");
+ swipe(true);swipe(true);capture("settings.ppm");
+ // An outward swipe is consumed even though Settings has no neighbor on that side.
+ uiTouch(true, 400, 80);
+ uiTouch(true, 600, 80);
+ assert(uiTouch(false, 0, 0));
+ frames();
+ assert(findLabel(lv_scr_act(), "Settings"));
+ uiTouch(true, 400, 80);
+ assert(!uiTouch(false, 0, 0));
  // A swipe along the dimming row must not navigate away from Settings.
- uiTouch(true,350,225);uiTouch(true,650,225);uiTouch(false,0,0);frames();assert(std::string(lv_label_get_text(lv_obj_get_child(lv_scr_act(),0)))=="Settings");
+ uiTouch(true,350,204);uiTouch(true,650,204);uiTouch(false,0,0);frames();assert(std::string(lv_label_get_text(lv_obj_get_child(lv_scr_act(),0)))=="Settings");
  assert(!findButton(lv_scr_act(),"Calendar") && !findButton(lv_scr_act(),"Weather") && !findButton(lv_scr_act(),"Settings"));
+ auto *rotation = findLabel(lv_scr_act(), "Rotate screen 180°");
+ assert(rotation);
+ auto *rotationSwitch = lv_obj_get_child(lv_obj_get_parent(rotation), 1);
+ assert(lv_obj_check_type(rotationSwitch, &lv_switch_class));
+ lv_obj_add_state(rotationSwitch, LV_STATE_CHECKED);
+ lv_event_send(rotationSwitch, LV_EVENT_VALUE_CHANGED, nullptr);
+ assert(settings.rotateScreen);
+ lv_obj_clear_state(rotationSwitch, LV_STATE_CHECKED);
+ lv_event_send(rotationSwitch, LV_EVENT_VALUE_CHANGED, nullptr);
+ assert(!settings.rotateScreen);
  auto *timeout = findLabel(lv_scr_act(), "Screen timeout");
  assert(timeout && findLabel(lv_scr_act(), "1 minute  >"));
  lv_event_send(lv_obj_get_parent(timeout), LV_EVENT_CLICKED, nullptr);
@@ -124,7 +142,7 @@ int main(int argc,char**argv){
  lv_event_send(findButton(lv_layer_top(), "Close"), LV_EVENT_CLICKED, nullptr);
  assert(sendCalendarLine(command) == CalendarUsbResult::Pending);
  std::cout<<"PASS: calendar USB setup accepts valid credentials only while enabled\n";
- swipe(true);
+ swipe(false);
  auto openPanel = [](const char *name) {
    auto *panel = findButton(lv_scr_act(), name);
    if (!panel) std::cerr << "Missing dashboard button: " << name << "\n";
@@ -190,7 +208,7 @@ int main(int argc,char**argv){
  assert(findLabel(lv_layer_top(), "41%"));
  closePanel();
  assert(!printRoomOpen.load());
- swipe(false);
+ swipe(true);
  auto *postal = findLabel(lv_scr_act(), "Postal code");
  assert(postal);
  lv_event_send(lv_obj_get_parent(postal), LV_EVENT_CLICKED, nullptr);

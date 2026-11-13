@@ -1,4 +1,5 @@
 #include "core.hpp"
+#include "screen_rotation.hpp"
 #include "screen_idle.hpp"
 #include "local_weather.hpp"
 #include <cassert>
@@ -8,6 +9,13 @@ using namespace core;
 static time_t at(int year,int month,int day,int hour=0,int min=0){tm t={};t.tm_year=year-1900;t.tm_mon=month-1;t.tm_mday=day;t.tm_hour=hour;t.tm_min=min;t.tm_isdst=-1;return mktime(&t);}
 static Event timed(time_t start,time_t end){Event e;e.start=start;e.end=end;return e;}
 int main(){
+ static_assert(screenRotation::flipX(0) == 799 && screenRotation::flipY(0) == 479);
+ static_assert(screenRotation::flipX(799) == 0 && screenRotation::flipY(479) == 0);
+ const int tile[] = {1, 2, 3, 4, 5, 6};
+ int flipped[6]{};
+ screenRotation::copyTile(tile, flipped, 6);
+ for (int i = 0; i < 6; ++i) assert(flipped[i] == 6 - i && tile[i] == i + 1);
+
  setenv("TZ", "EST5EDT,M3.2.0,M11.1.0", 1);
  tzset();
  assert(localWeather::utcTimestamp("2024-02-29T00:00:00Z") == 1709164800);

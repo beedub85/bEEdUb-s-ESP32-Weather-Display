@@ -2,7 +2,7 @@
 This is built for the 800 × 480 touchscreen version and includes a dashboard that reads data from byte4geek's weather station (https://github.com/byte4geek/weatherstation) wirelessly and displays Google Calendar events on another screen. It boots straight into weather cards with swipe navigation to Calendar and Settings. Device configuration is saved between restarts. Use the touchscreen for settings or the Windows USB helper for Google Calendar credentials. Open this folder in VS Code with PlatformIO installed. Firmware version: 0.1.0, first hardware-test release.
 
 ## Navigation
-The display boots straight into **Weather**. Swipe right from Weather for **Calendar**; swipe left from Weather for **Settings**. 
+The display boots straight into **Weather**. Swipe left from Weather for **Calendar**; swipe right from Weather for **Settings**.
 
 Weather cards show temperature, humidity, wind, pressure, rolling 24-hour rainfall, light, and ENS160 air quality. The main condition icon changes for detected rain, estimated sunny/partly cloudy/cloudy conditions, low light, or unavailable data. Sunny/cloudy choices are rough light-level estimates. Rain uses the station’s `is_raining` flag (rain detected within its last-five-minute window), rather than the day’s accumulated rainfall. The station cards use your existing weather station. The optional forecast and alert screens use public feeds. Stale data clears the main condition icon to unavailable. Tap a weather card to see its related readings. The display requests station readings on connection, when the station address changes, and every five minutes during normal operation. Failed requests retain the last known readings, which are marked stale after five minutes and 30 seconds without a successful update.
 
@@ -22,9 +22,13 @@ Weather data source: [Environment and Climate Change Canada, City Page Weather](
 
 Tap **Print Room** on the Weather dashboard for read-only printer progress, status, temperatures, and optional room sensors. Set up the local Home Assistant bridge and enter its address under **Settings → Print Room**. [Print Room setup](docs/PRINT_ROOM_SETUP.md)
 
+### Screen rotation
+
+Use **Settings → Rotate screen 180°** to flip the display and touch together. The orientation resets on reboot, so pressing RESET restores the normal orientation if you encounter problems.
+
 ### Battery indicator
 
-The top corner shows a percentage when an optional MAX17048 single-cell fuel gauge is available on the board's I²C bus (address `0x36`). The Waveshare battery connector supplies power, but the stock board does not provide a firmware-readable charge percentage. The default build shows `--%` and leaves gauge polling off. Once a MAX17048 is connected, uncomment `-DENABLE_MAX17048_GAUGE=1` under `build_flags` in `platformio.ini`, then rebuild and upload. A missing or unreadable gauge shows `--%`. The percentage is the gauge's estimated state of charge. Use a compatible gauge breakout with a protected single-cell battery and follow the breakout manufacturer's connection and polarity instructions.
+The top corner shows a percentage when an optional MAX17048 single-cell fuel gauge is available on the board's I²C bus (address `0x36`). The Waveshare battery connector supplies power, but the stock board does not provide a firmware-readable charge percentage. The default build shows `N/C` and leaves gauge polling off. Once a MAX17048 is connected, uncomment `-DENABLE_MAX17048_GAUGE=1` under `build_flags` in `platformio.ini`, then rebuild and upload. A missing or unreadable gauge shows `N/C`. The percentage is the gauge's estimated state of charge. Use a compatible gauge breakout with a protected single-cell battery and follow the breakout manufacturer's connection and polarity instructions.
 
 ## 1. Build and Upload
 1. Install VS Code and the PlatformIO IDE extension.
@@ -38,11 +42,11 @@ The top corner shows a percentage when an optional MAX17048 single-cell fuel gau
 No filesystem upload is required. Never flash this display firmware onto the existing weather station.
 
 ## 2. First Connection
-1. On the screen, swipe left to **Settings**.
+1. On the screen, swipe right to **Settings**.
 2. Tap **Wi-Fi**. Enter your 2.4 GHz network name and password with the onscreen keyboard; tap Save. Scroll the form to reach the password field.
 NOTE: If the ESP32 weather-station is set up broadcasting its own WIFI, then those are the details you'll enter here.
 3. Tap **Weather station** and enter its base address, e.g. `http://192.168.1.111`. Use the IP shown on your working station dashboard.
-4. Swipe right back to Weather. Values should appear after connection. The display and station must be reachable on the same network.
+4. Swipe left back to Weather. Values should appear after connection. The display and station must be reachable on the same network.
 
 Settings are saved in the display's NVS flash. They do not modify the station. A Wi-Fi password is needed locally on the device, not in this conversation. Saved secrets are not flash-encrypted in this first release; anyone with physical access to the board may extract them.
 
