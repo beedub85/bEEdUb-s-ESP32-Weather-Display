@@ -100,34 +100,43 @@ static bool fetchWeather(const Settings &c,Weather &w,String &error){
   }else error=code>0?"Station HTTP "+String(code):"Station not reachable";
   http.end();return ok;
 }
-static bool publicJson(const String &url, JsonDocument &result, size_t cap, JsonDocument *filter = nullptr) {
+static bool publicJson(const String &url, JsonDocument &result, size_t cap, JsonDocument *filter, String &error) {
   WiFiClientSecure tls;
   tls.setCACert(WEATHER_ROOTS);
   tls.setHandshakeTimeout(5);
   HTTPClient http;
-  if (!http.begin(tls, url)) return false;
+  if (!http.begin(tls, url)) { error = "invalid URL"; return false; }
   http.setConnectTimeout(4000);
   http.setTimeout(5000);
   http.useHTTP10(true);
-  if (http.GET() != 200 || http.getSize() > static_cast<int>(cap)) return false;
-  BoundedResponse body(cap);
-  if (http.writeToStream(&body) < 0) return false;
-  if (filter) {
-    return !deserializeJson(result, body.data.data(), body.data.size(),
-                            DeserializationOption::Filter(*filter));
+  const int code = http.GET();
+  if (code != 200) {
+    error = code > 0 ? String("HTTP ") + String(code) : String("connection error ") + String(code);
+    return false;
   }
-  return !deserializeJson(result, body.data.data(), body.data.size());
+  BoundedResponse body(cap);
+  if (http.getSize() > static_cast<int>(cap) || http.writeToStream(&body) < 0) {
+    error = "response could not be read";
+    return false;
+  }
+  const auto status = deserializeJson(result, body.data.data(), body.data.size(),
+                                      DeserializationOption::Filter(*filter));
+  if (status) error = String("invalid response: ") + status.c_str();
+  return !status;
 }
 
 static constexpr char cityPages[] =
     "https://api.weather.gc.ca/collections/citypageweather-realtime/items";
 
-static String cityForPostalCode(const String &postal) {
+static String cityForPostalCode(const String &postal, String &error) {
   ExternalJsonAllocator allocator;
   JsonDocument lookup(&allocator), placesFilter;
   placesFilter["places"][0]["latitude"] = true;
   placesFilter["places"][0]["longitude"] = true;
-  if (!publicJson(String("https://api.zippopotam.us/CA/") + postal, lookup, 16000, &placesFilter)) return "";
+  if (!publicJson(String("https://api.zippopotam.us/CA/") + postal, lookup, 16000, &placesFilter, error)) {
+    error = String("Postal lookup: ") + error;
+    return "";
+  }
   double lat = 0, lon = 0;
   unsigned count = 0;
   for (JsonObject place : lookup["places"].as<JsonArray>()) {
@@ -138,7 +147,7 @@ static String cityForPostalCode(const String &postal) {
     lon += x;
     ++count;
   }
-  if (!count) return "";
+  if (!count) { error = "Postal area has no usable coordinates"; return ""; }
   lat /= count;
   lon /= count;
   const double lonScale = cos(lat * 0.01745329252);
@@ -149,7 +158,10 @@ static String cityForPostalCode(const String &postal) {
     const String url = String(cityPages) + "?f=json&limit=100&properties=name&bbox=" +
         String(lon - radius / lonScale, 4) + "," + String(lat - radius, 4) + "," +
         String(lon + radius / lonScale, 4) + "," + String(lat + radius, 4);
-    if (!publicJson(url, cities, 60000, &filter)) return "";
+    if (!publicJson(url, cities, 60000, &filter, error)) {
+      error = String("Environment Canada location search: ") + error;
+      return "";
+    }
     double best = INFINITY;
     String id;
     for (JsonObject city : cities["features"].as<JsonArray>()) {
@@ -168,6 +180,7 @@ static String cityForPostalCode(const String &postal) {
     }
     if (id.length()) return id;
   }
+  error = "No nearby Environment Canada forecast location found";
   return "";
 }
 
@@ -189,7 +202,10 @@ static bool fetchLocalForecast(const String &id, LocalForecast &result) {
   hourly["temperature"]["value"]["en"] = true;
   hourly["lop"]["value"]["en"] = true;
   hourly["condition"]["en"] = true;
-  if (!publicJson(String(cityPages) + "/" + id + "?f=json", data, 160000, &filter)) return false;
+  if (!publicJson(String(cityPages) + "/" + id + "?f=json", data, 160000, &filter, result.error)) {
+    result.error = String("Environment Canada feed: ") + result.error;
+    return false;
+  }
   auto city = data["properties"];
   result.location = english(city["name"]);
   result.region = english(city["region"]);
@@ -345,8 +361,8 @@ static void networkTask(void*){
         (justConnected || !localAttempted || c.postalCode != lastPostal || millis() - localAt >= weatherPollIntervalMs)) {
       if (c.postalCode != lastPostal) cityId = "";
       lastPostal = c.postalCode;
-      if (cityId.isEmpty()) cityId = cityForPostalCode(c.postalCode);
       LocalForecast result;
+      if (cityId.isEmpty()) cityId = cityForPostalCode(c.postalCode, result.error);
       result.postalCode = c.postalCode;
       const bool ok = !cityId.isEmpty() && fetchLocalForecast(cityId, result);
       lock();
@@ -355,7 +371,7 @@ static void networkTask(void*){
         else {
           if (localForecast.postalCode != c.postalCode) localForecast = LocalForecast{};
           localForecast.postalCode = c.postalCode;
-          localForecast.error = cityId.isEmpty() ? "Postal area lookup unavailable" : "Environment Canada feed unavailable";
+          localForecast.error = result.error.isEmpty() ? String("Environment Canada feed unavailable") : result.error;
         }
       }
       unlock();
