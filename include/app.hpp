@@ -45,6 +45,7 @@ struct LocalForecast {
   time_t checked = 0;
   bool alertsKnown = false;
   std::vector<ForecastHour> hours;
+  String accumulationSummary;
   std::vector<WeatherAlert> alerts;
 };
 extern LocalForecast localForecast;

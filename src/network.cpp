@@ -199,6 +199,32 @@ static String english(JsonVariantConst value) {
   return value["en"] | "";
 }
 
+static String forecastAccumulation(JsonVariantConst periods) {
+  String summary;
+  unsigned examined = 0;
+  for (JsonObjectConst period : periods.as<JsonArrayConst>()) {
+    if (examined++ >= 2) break;
+    const String name = english(period["period"]["textForecastName"]);
+    if (name.isEmpty()) continue;
+    const auto precipitation = period["precipitation"];
+    // Keep the published wording so ranges and mixed precipitation stay intact.
+    String amount = english(precipitation["textSummary"]);
+    const auto accumulation = precipitation["accumulation"];
+    const String kind = english(accumulation["name"]);
+    if (amount.isEmpty()) {
+      const String unit = english(accumulation["amount"]["units"]);
+      const float value = number(accumulation["amount"]["value"]["en"]);
+      if (!kind.isEmpty() && !unit.isEmpty() && std::isfinite(value) && value >= 0) {
+        amount = kind + " " + String(value, value == floorf(value) ? 0 : 1) + " " + unit;
+      }
+    }
+    if (amount.isEmpty()) continue;
+    if (!summary.isEmpty()) summary += "\n";
+    summary += name + ": " + amount;
+  }
+  return summary;
+}
+
 static bool fetchLocalForecast(const String &id, LocalForecast &result) {
   ExternalJsonAllocator allocator;
   JsonDocument data(&allocator), filter;
@@ -207,6 +233,10 @@ static bool fetchLocalForecast(const String &id, LocalForecast &result) {
   properties["lastUpdated"] = true;
   properties["region"]["en"] = true;
   properties["warnings"] = true;
+  JsonObject period = properties["forecastGroup"]["forecasts"][0].to<JsonObject>();
+  period["period"]["textForecastName"]["en"] = true;
+  period["precipitation"]["textSummary"]["en"] = true;
+  period["precipitation"]["accumulation"] = true;
   JsonObject hourly = properties["hourlyForecastGroup"]["hourlyForecasts"][0].to<JsonObject>();
   hourly["timestamp"] = true;
   hourly["temperature"]["value"]["en"] = true;
@@ -219,6 +249,7 @@ static bool fetchLocalForecast(const String &id, LocalForecast &result) {
   auto city = data["properties"];
   result.location = english(city["name"]);
   result.region = english(city["region"]);
+  result.accumulationSummary = forecastAccumulation(city["forecastGroup"]["forecasts"]);
   if (result.location.isEmpty()) return false;
   for (JsonObject row : city["hourlyForecastGroup"]["hourlyForecasts"].as<JsonArray>()) {
     const time_t at = localWeather::utcTimestamp(row["timestamp"] | "");

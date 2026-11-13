@@ -174,7 +174,11 @@ int main(int argc,char**argv){
                        {4.0f + std::sin(i / 30.0f) * 5, 1014, 15, 3}});
  testMillis += 1000;
  frames();
- openPanel("Today at a Glance");capture("today-at-a-glance.ppm");closePanel();
+ localForecast.accumulationSummary = "Today: Rainfall amount 5 mm.\nTonight: Snowfall amount 2 to 4 cm.";
+ openPanel("Today at a Glance");
+ assert(findLabel(lv_layer_top(), localForecast.accumulationSummary.c_str()));
+ capture("today-at-a-glance.ppm");
+ closePanel();
  openPanel("Weather Trends");capture("weather-trends.ppm");closePanel();
  openPanel("Active alerts");capture("weather-alerts.ppm");closePanel();
  settings.printRoomUrl = "http://192.168.1.10:8787/status";

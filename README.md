@@ -14,7 +14,7 @@ Tap a station card to see its related readings. Use the shortcuts along the bott
 
 | Screen | What it shows |
 | --- | --- |
-| **Today at a Glance** | Your station's current temperature and reported high and low, up to two remaining Google Calendar events today, and up to four hourly forecasts. |
+| **Today at a Glance** | Your station's current temperature and reported high and low, up to two remaining Google Calendar events today, and up to four hourly forecasts. Rain and snow accumulation appear by forecast period when Environment Canada publishes amounts. |
 | **Weather Trends** | Temperature, pressure, 10-minute peak wind gusts, and rolling 24-hour rainfall. The display samples the station every five minutes. Tap the chart to inspect a reading. History starts after time sync and clears when the display restarts or the station address changes. |
 | **Weather Alerts** | Active advisories, watches, warnings, and statements for the matched Environment Canada area, with expiry times when available. The shortcut highlights when fresh active alerts are present. |
 

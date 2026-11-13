@@ -22,7 +22,7 @@ static Settings draft;
 enum class WeatherPanel { None, Today, Trends, Alerts, PrintRoom };
 static WeatherPanel weatherPanel = WeatherPanel::None;
 static localWeather::Metric trendMetric = localWeather::Temperature;
-static lv_obj_t *todayStation, *todayEvents, *todayForecast, *alertsBody, *alertsButton;
+static lv_obj_t *todayStation, *todayEvents, *todayForecast, *todayAccumulation, *alertsBody, *alertsButton;
 static lv_obj_t *printPrinter, *printStatus, *printJob, *printPercent, *printBar, *printEta;
 static lv_obj_t *printMetrics[7], *printConnection;
 static lv_obj_t *trendChart, *trendScale, *trendReading;
@@ -256,6 +256,9 @@ static void updateToday(const LocalForecast &forecast, const String &agenda, tim
     if (!shown) hours += "\nHourly forecast unavailable";
   } else hours = forecastStatus(forecast);
   updateLabel(todayForecast, hours.c_str());
+  const char *amount = forecastFresh(forecast, now) && !forecast.accumulationSummary.isEmpty() ?
+                       forecast.accumulationSummary.c_str() : "Accumulation amounts unavailable";
+  updateLabel(todayAccumulation, amount);
 }
 
 static void openToday(lv_event_t *) {
@@ -263,19 +266,23 @@ static void openToday(lv_event_t *) {
   auto *screen = newModal("Today at a Glance");
   weatherPanel = WeatherPanel::Today;
   todayOverviewOpen.store(true);
-  auto *station = box(screen, 20, 70, 760, 77, CARD);
+  auto *station = box(screen, 20, 70, 760, 70, CARD);
   label(station, "YOUR WEATHER STATION", 16, 10, 728, &lv_font_montserrat_14, TEAL);
   todayStation = label(station, "", 16, 32, 728, &lv_font_montserrat_24);
-  auto *agenda = box(screen, 20, 157, 760, 105, CARD);
+  auto *agenda = box(screen, 20, 147, 760, 88, CARD);
   label(agenda, "NEXT ON YOUR CALENDAR", 16, 10, 728, &lv_font_montserrat_14, TEAL);
   todayEvents = label(agenda, "", 16, 33, 728, &lv_font_montserrat_16);
-  lv_obj_set_height(todayEvents, 64);
+  lv_obj_set_height(todayEvents, 52);
   lv_label_set_long_mode(todayEvents, LV_LABEL_LONG_DOT);
-  auto *hours = box(screen, 20, 272, 760, 185, CARD);
+  auto *hours = box(screen, 20, 242, 760, 218, CARD);
   label(hours, "HOURLY FORECAST  /  ENVIRONMENT CANADA", 16, 10, 728, &lv_font_montserrat_14, TEAL);
-  todayForecast = label(hours, "", 16, 34, 728, &lv_font_montserrat_18);
-  lv_obj_set_height(todayForecast, 145);
+  todayForecast = label(hours, "", 16, 34, 728, &lv_font_montserrat_16);
+  lv_obj_set_height(todayForecast, 103);
   lv_label_set_long_mode(todayForecast, LV_LABEL_LONG_DOT);
+  label(hours, "FORECAST ACCUMULATION BY PERIOD", 16, 143, 728, &lv_font_montserrat_14, TEAL);
+  todayAccumulation = label(hours, "", 16, 165, 728, &lv_font_montserrat_14);
+  lv_obj_set_height(todayAccumulation, 50);
+  lv_label_set_long_mode(todayAccumulation, LV_LABEL_LONG_DOT);
   lastTick = millis() - 1000;
 }
 
