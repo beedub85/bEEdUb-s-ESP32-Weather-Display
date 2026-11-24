@@ -16,6 +16,10 @@ public:
  bool endsWith(const char*s)const {std::string v=s;return size()>=v.size() && compare(size()-v.size(),v.size(),v)==0;}
  void trim(){auto a=find_first_not_of(" \t\r\n");if(a==npos){clear();return;}assign(substr(a,find_last_not_of(" \t\r\n")-a+1));}
  void toLowerCase(){for(char &c : *this) if(c>='A' && c<='Z') c += 'a'-'A';}
+ void remove(unsigned index, unsigned count){erase(index,count);}
+ String substring(unsigned from) const {return substr(from);}
+ String substring(unsigned from,unsigned to) const {return substr(from,to-from);}
+ int indexOf(char c) const {const auto pos=find(c);return pos==npos ? -1 : static_cast<int>(pos);}
  bool isEmpty()const{return empty();}
 };
 inline String operator+(const String&s,int n){return String(static_cast<const std::string&>(s)+std::to_string(n));}
