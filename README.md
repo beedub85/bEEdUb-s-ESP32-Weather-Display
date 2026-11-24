@@ -1,5 +1,5 @@
 # Weather Display - Waveshare ESP32-S3 Touch LCD 7
-This is built for the 800 × 480 touchscreen version and includes a dashboard that reads data from byte4geek's weather station (https://github.com/byte4geek/weatherstation) wirelessly and displays Google Calendar events on another screen. It boots straight into weather cards with swipe navigation to Calendar and Settings. Device configuration is saved between restarts. Use the touchscreen for settings or the Windows USB helper for Google Calendar credentials. Open this folder in VS Code with PlatformIO installed. Firmware version: 0.1.0, first hardware-test release.
+This is built for the 800 × 480 touchscreen version and includes a dashboard that reads data from byte4geek's weather station (https://github.com/byte4geek/weatherstation) wirelessly and displays Google Calendar events on another screen. It boots straight into weather cards with swipe navigation to Calendar and Settings. Device configuration is saved between restarts. Use the touchscreen for settings or the Windows USB helper for Google Calendar credentials. Open this folder in VS Code with PlatformIO installed. Firmware version 2.0.
 
 ## Navigation
 The display boots straight into **Weather**. Swipe left from Weather for **Calendar**; swipe right from Weather for **Settings**.

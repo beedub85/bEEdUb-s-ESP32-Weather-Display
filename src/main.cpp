@@ -121,7 +121,7 @@ void setup() {
   }
 #endif
   screenIdle.begin(millis());
-  Serial.printf("Weather Display 0.1.0 | Flash %u MB | PSRAM %u MB\n",ESP.getFlashChipSize()/1048576,ESP.getPsramSize()/1048576);
+  Serial.printf("Weather Display 2.0 | Flash %u MB | PSRAM %u MB\n",ESP.getFlashChipSize()/1048576,ESP.getPsramSize()/1048576);
 }
 void loop() {
   if (!backlightOff) {
