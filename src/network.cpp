@@ -1,6 +1,7 @@
 #include "app.hpp"
 #include <Preferences.h>
 #include <WiFi.h>
+#include <ESPmDNS.h>
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
 #include <ArduinoJson.h>
@@ -20,7 +21,7 @@ static void unlock(){xSemaphoreGive(stateMutex);}
 void loadSettings(){
   Preferences p;p.begin("wx-display",true);
   settings.ssid=p.getString("ssid","");settings.password=p.getString("password","");
-  settings.station=p.getString("station","http://192.168.2.149");
+  settings.station=p.getString("station","http://weatherstation.local");
   settings.calendarUrl=p.getString("calurl","");settings.calendarToken=p.getString("caltoken","");
   const String savedTimezone = p.getString("tz", core::winnipegTimeZone);
   settings.timezone = core::normalizeTimeZone(savedTimezone.c_str());
@@ -87,10 +88,49 @@ public:
     data.append(reinterpret_cast<const char*>(p),n);return n;
   }
 };
+
+// Maintain mDNS independently of the saved application/device identity.
+static void maintainLocalMdns() {
+    static bool active = false;
+    static IPAddress advertisedIP;
+    static unsigned long lastAttempt = 0;
+    static bool attempted = false;
+    const IPAddress ip = WiFi.localIP();
+    if (WiFi.status() != WL_CONNECTED || ip == IPAddress(0, 0, 0, 0)) {
+        if (active) MDNS.end();
+        active = false;
+        attempted = false;
+        return;
+    }
+    if (active && ip == advertisedIP) return;
+    if (active) { MDNS.end(); active = false; attempted = false; }
+    if (attempted && millis() - lastAttempt < 10000UL) return;
+    attempted = true;
+    lastAttempt = millis();
+    if (MDNS.begin("weatherdisplay")) {
+        active = true;
+        advertisedIP = ip;
+        
+        Serial.println("[mDNS] weatherdisplay.local");
+    }
+}
+
 static bool fetchWeather(const Settings &c,Weather &w,String &error){
   WiFiClient client;HTTPClient http;String url=c.station;
   while(url.endsWith("/"))url.remove(url.length()-1);
-  if(!url.startsWith("http://")){error="Use http:// followed by the station IP";return false;}
+  if(!url.startsWith("http://")){error="Use http:// followed by the station hostname or IP";return false;}
+  // Resolve .local explicitly on every request; preserve port and path.
+  const int authorityEnd = url.indexOf('/', 7);
+  const int end = authorityEnd < 0 ? url.length() : authorityEnd;
+  const int colon = url.indexOf(':', 7);
+  const int hostEnd = colon >= 0 && colon < end ? colon : end;
+  String host = url.substring(7, hostEnd);
+  if (host.endsWith(".local")) {
+    String name = host.substring(0, host.length() - 6);
+    IPAddress ip = MDNS.queryHost(name.c_str(), 2000);
+    if (ip == IPAddress(0, 0, 0, 0)) { error="Station mDNS name not found"; return false; }
+    url = String("http://") + ip.toString() + url.substring(hostEnd);
+  }
   if(!http.begin(client,url+"/api/status")){error="Invalid station address";return false;}
   http.setConnectTimeout(2500);http.setTimeout(2500);http.useHTTP10(true);
   int code=http.GET();bool ok=false;
@@ -314,7 +354,7 @@ static bool fetchCalendar(const Settings &c,time_t week,core::Events &events,boo
   http.end();return ok;
 }
 static void networkTask(void*){
-  WiFi.mode(WIFI_STA);WiFi.setSleep(false);WiFi.setAutoReconnect(true);
+  WiFi.setHostname("weatherdisplay");WiFi.mode(WIFI_STA);WiFi.setSleep(false);WiFi.setAutoReconnect(true);
   String lastSSID,lastPassword,lastTZ,lastStation,lastPostal,cityId;
   uint32_t localAt = 0;
   bool localAttempted = false;
@@ -329,6 +369,7 @@ static void networkTask(void*){
       WiFi.disconnect();if(c.ssid.length())WiFi.begin(c.ssid.c_str(),c.password.c_str());
       lastSSID=c.ssid;lastPassword=c.password;first=false;lastReconnect=millis();
     }
+    maintainLocalMdns();
     if(WiFi.status()!=WL_CONNECTED){
       wasConnected=false;
       lock();if(localForecast.postalCode==c.postalCode)localForecast.error="Wi-Fi disconnected";shared.weatherError=c.ssid.isEmpty()?"Swipe right to set up Wi-Fi":"Connecting to Wi-Fi...";if(shared.calendarLoaded)shared.calendarError="Wi-Fi disconnected";unlock();
